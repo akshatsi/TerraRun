@@ -1,8 +1,8 @@
-# 🏃 INTVL — Gamified Territory‑Capture Running App
+# 🏃 TerraRun — Gamified Territory‑Capture Running App
 
 > Run more. Own the map. Compete with your city.
 
-INTVL turns boring running into a **territory‑capture game**. Every run you take gets tracked via GPS and converts the path you cover into territory on a shared city map. The more you run, the bigger your territory grows — and you can steal territory from other runners!
+TerraRun turns boring running into a **territory‑capture game**. Every run you take gets tracked via GPS and converts the path you cover into territory on a shared city map. The more you run, the bigger your territory grows — and you can steal territory from other runners!
 
 ---
 
