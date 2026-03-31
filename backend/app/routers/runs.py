@@ -36,7 +36,7 @@ async def submit_run(
             "lat": p.lat,
             "lng": p.lng,
             "altitude": p.altitude,
-            "timestamp": p.timestamp,
+            "timestamp": p.timestamp.replace(tzinfo=None) if p.timestamp else None,
         }
         for p in body.gps_points
     ]
@@ -45,8 +45,8 @@ async def submit_run(
     run = await create_run(
         db,
         user_id=current_user.id,
-        started_at=body.started_at,
-        ended_at=body.ended_at,
+        started_at=body.started_at.replace(tzinfo=None) if body.started_at else None,
+        ended_at=body.ended_at.replace(tzinfo=None) if body.ended_at else None,
         gps_points_data=gps_data,
     )
 

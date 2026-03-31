@@ -27,7 +27,7 @@ TerraRun/
 │   ├── Dockerfile
 │   └── requirements.txt
 │
-└── frontend/                   # (Coming next) Next.js + Mapbox
+└── frontend/                
 ```
 
 ---
@@ -93,7 +93,7 @@ docker compose exec backend alembic upgrade head
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `postgresql+asyncpg://intvl:intvl_secret@db:5432/intvl` | Async Postgres URL |
+| `DATABASE_URL` | `postgresql+asyncpg://terrarun:terrarun_secret@db:5432/terrarun` | Async Postgres URL |
 | `JWT_SECRET_KEY` | `change-me` | Secret for signing JWTs |
 | `JWT_ALGORITHM` | `HS256` | JWT algorithm |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `60` | Access token TTL |

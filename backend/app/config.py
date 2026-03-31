@@ -7,16 +7,16 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # ── Database ──
-    DATABASE_URL: str = "postgresql+asyncpg://intvl:intvl_secret@db:5432/intvl"
+    DATABASE_URL: str
 
     # ── JWT ──
-    JWT_SECRET_KEY: str = "change-me"
+    JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # ── App ──
-    APP_NAME: str = "INTVL"
+    APP_NAME: str = "TerraRun"
     DEBUG: bool = False
 
     class Config:

@@ -1,20 +1,20 @@
-version: "3.8"
+
 
 services:
   db:
-    image: postgis/postgis:15-3.3
-    container_name: intvl_db
+    image: postgis/postgis:15-3.4
+    container_name: terrarun_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-intvl}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-intvl_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-intvl}
+      POSTGRES_USER: ${POSTGRES_USER:-terrarun}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-terrarun_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-terrarun}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U intvl"]
+      test: ["CMD-SHELL", "pg_isready -U terrarun"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -23,7 +23,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: intvl_backend
+    container_name: terrarun_backend
     restart: unless-stopped
     env_file:
       - .env

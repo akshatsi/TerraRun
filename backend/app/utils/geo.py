@@ -33,8 +33,10 @@ def union_polygons(geojson_a: dict | None, geojson_b: dict | None) -> dict | Non
 
     if not shapes:
         return None
-
-    merged = unary_union(shapes)
+    elif len(shapes) == 1:
+        merged = shapes[0]
+    else:
+        merged = shapes[0].union(shapes[1])
 
     # Ensure we always store as MultiPolygon
     if isinstance(merged, Polygon):

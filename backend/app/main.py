@@ -1,5 +1,5 @@
 """
-INTVL — FastAPI application entry point.
+TerraRun — FastAPI application entry point.
 """
 
 from fastapi import FastAPI
