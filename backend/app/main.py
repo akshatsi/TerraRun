@@ -16,7 +16,8 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# ── CORS (allow frontend dev server) ──
+# ── CORS (allow frontend dev server + Flutter mobile) ──
+# In production, restrict these to your actual domains.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -24,6 +25,10 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        "http://localhost:8080",   # Flutter web dev server
+        "http://localhost:8000",
+        "http://10.0.2.2:8000",   # Android emulator
+        "*",                       # Allow mobile native (no Origin header)
     ],
     allow_credentials=True,
     allow_methods=["*"],
