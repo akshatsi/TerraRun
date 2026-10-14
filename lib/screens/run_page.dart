@@ -4,6 +4,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../data/run_data.dart';
+import '../services/location_service.dart';
 import '../services/run_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
@@ -25,7 +26,11 @@ class _RunPageState extends State<RunPage> {
   int secondsElapsed = 0;
   double distanceKm = 0.0;
   double avgSpeed = 0.0;
-  String statusText = 'Ready to run';
+  static const _readyText = 'Ready to run';
+  String statusText = _readyText;
+
+  bool _mapReady = false;
+  bool _centred = RunDataStore.currentLatitude != null;
 
   Timer? timer;
   StreamSubscription<Position>? positionStream;
@@ -40,6 +45,35 @@ class _RunPageState extends State<RunPage> {
 
   List<LatLng> get latestPathPoints {
     return runPath.map((p) => LatLng(p.latitude, p.longitude)).toList();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    LocationService.latest.addListener(_onLocationChanged);
+    LocationService.status.addListener(_onLocationChanged);
+  }
+
+  void _onLocationChanged() {
+    if (!mounted) return;
+    _centreOnFirstFix();
+    // While running, the position stream already rebuilds the page.
+    if (!isRunning) setState(() {});
+  }
+
+  /// Moves the map to the user once, when the first fix arrives.
+  void _centreOnFirstFix() {
+    final position = LocationService.latest.value;
+    if (position == null || !_mapReady || _centred || isRunning) return;
+
+    _centred = true;
+    mapController.move(LatLng(position.latitude, position.longitude), 17);
+  }
+
+  String get _bannerText {
+    if (isRunning) return 'GPS acquired';
+    if (statusText != _readyText) return statusText;
+    return LocationService.hint ?? _readyText;
   }
 
   bool _isLoopClosed(List<RunPoint> path) {
@@ -69,35 +103,22 @@ class _RunPageState extends State<RunPage> {
   Future<void> startRun() async {
     if (isRunning) return;
 
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
+    final access = await LocationService.ensurePermission();
+
+    if (access != LocationStatus.ready) {
       if (!mounted) return;
       setState(() {
-        statusText = 'Enable location services';
+        statusText = switch (access) {
+          LocationStatus.serviceOff => 'Enable location services',
+          LocationStatus.deniedForever => 'Allow location from settings',
+          _ => 'Location permission denied',
+        };
       });
       return;
     }
 
-    LocationPermission permission = await Geolocator.checkPermission();
-
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        if (!mounted) return;
-        setState(() {
-          statusText = 'Location permission denied';
-        });
-        return;
-      }
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      if (!mounted) return;
-      setState(() {
-        statusText = 'Allow location from settings';
-      });
-      return;
-    }
+    // Permission may have just been granted; make sure the map follows too.
+    LocationService.startPassive();
 
     timer?.cancel();
     await positionStream?.cancel();
@@ -125,10 +146,7 @@ class _RunPageState extends State<RunPage> {
     });
 
     positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 3,
-      ),
+      locationSettings: LocationService.runSettings(),
     ).listen((Position position) {
       if (!mounted) return;
 
@@ -158,12 +176,12 @@ class _RunPageState extends State<RunPage> {
       setState(() {
         runPath.add(point);
         RunDataStore.latestRunPath = List.from(runPath);
-        RunDataStore.currentLatitude = position.latitude;
-        RunDataStore.currentLongitude = position.longitude;
 
         distanceKm += addedKm;
         _recalculateAvgSpeed();
       });
+
+      LocationService.publish(position);
 
       mapController.move(
         LatLng(position.latitude, position.longitude),
@@ -252,7 +270,7 @@ class _RunPageState extends State<RunPage> {
       secondsElapsed = 0;
       distanceKm = 0.0;
       avgSpeed = 0.0;
-      statusText = 'Ready to run';
+      statusText = _readyText;
       lastPosition = null;
       runPath.clear();
       RunDataStore.latestRunPath = [];
@@ -294,7 +312,7 @@ class _RunPageState extends State<RunPage> {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              isRunning ? 'GPS acquired' : statusText,
+              _bannerText,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: AppText.subtitle.copyWith(
@@ -396,6 +414,8 @@ class _RunPageState extends State<RunPage> {
 
   @override
   void dispose() {
+    LocationService.latest.removeListener(_onLocationChanged);
+    LocationService.status.removeListener(_onLocationChanged);
     timer?.cancel();
     positionStream?.cancel();
     super.dispose();
@@ -415,6 +435,10 @@ class _RunPageState extends State<RunPage> {
             options: MapOptions(
               initialCenter: currentLatLng,
               initialZoom: hasLocation ? 17 : 15,
+              onMapReady: () {
+                _mapReady = true;
+                _centreOnFirstFix();
+              },
             ),
             children: [
               buildBaseTileLayer(),

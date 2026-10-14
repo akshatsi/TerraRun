@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../data/run_data.dart';
+import '../services/location_service.dart';
 import '../services/stats_service.dart';
 import '../services/territory_service.dart';
 import '../theme/app_theme.dart';
@@ -27,6 +28,9 @@ class _MapPageState extends State<MapPage> {
   double _totalDistance = 0.0;
   int _totalRuns = 0;
 
+  bool _mapReady = false;
+  bool _centred = RunDataStore.currentLatitude != null;
+
   // 0 = all players, 1 = only my territory
   int _filterIndex = 0;
 
@@ -49,9 +53,19 @@ class _MapPageState extends State<MapPage> {
         .toList();
   }
 
+  /// Moves the map to the user once, when the first fix arrives.
+  void _centreOnFirstFix() {
+    final position = LocationService.latest.value;
+    if (position == null || !_mapReady || _centred) return;
+
+    _centred = true;
+    mapController.move(LatLng(position.latitude, position.longitude), 16);
+  }
+
   @override
   void initState() {
     super.initState();
+    LocationService.latest.addListener(_centreOnFirstFix);
     _loadRuns();
     _loadTerritories();
 
@@ -179,6 +193,7 @@ class _MapPageState extends State<MapPage> {
 
   @override
   void dispose() {
+    LocationService.latest.removeListener(_centreOnFirstFix);
     followTimer?.cancel();
     super.dispose();
   }
@@ -250,6 +265,10 @@ class _MapPageState extends State<MapPage> {
             options: MapOptions(
               initialCenter: currentLatLng,
               initialZoom: hasLiveLocation ? 16 : 14,
+              onMapReady: () {
+                _mapReady = true;
+                _centreOnFirstFix();
+              },
             ),
             children: [
               buildBaseTileLayer(),

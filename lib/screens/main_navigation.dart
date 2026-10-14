@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/location_service.dart';
 import '../theme/app_theme.dart';
 import 'home_page.dart';
 import 'run_page.dart';
@@ -16,24 +17,53 @@ class MainNavigation extends StatefulWidget {
 class _MainNavigationState extends State<MainNavigation> {
   int selectedIndex = 0;
 
+  // Index 2 is the Run tab. It is built once and then kept alive, so a run
+  // keeps recording while the user looks at another tab.
   final List<Widget> pages = const [
     HomePage(),
     MapPage(),
-    RunPage(),
+    SizedBox.shrink(),
     LeaderboardPage(),
     ProfilePage(),
   ];
 
+  final Widget _runPage = const RunPage();
+  bool _runVisited = false;
+
+  @override
+  void initState() {
+    super.initState();
+    LocationService.startPassive();
+  }
+
+  @override
+  void dispose() {
+    LocationService.stopPassive();
+    super.dispose();
+  }
+
   void onItemTapped(int index) {
     setState(() {
       selectedIndex = index;
+      if (index == 2) _runVisited = true;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: pages[selectedIndex],
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          pages[selectedIndex],
+          if (_runVisited)
+            Offstage(
+              key: const ValueKey('run-tab'),
+              offstage: selectedIndex != 2,
+              child: _runPage,
+            ),
+        ],
+      ),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           color: AppColors.bg,
