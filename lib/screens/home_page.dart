@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import '../services/stats_service.dart';
 import '../services/auth_service.dart';
 import '../services/territory_service.dart';
+import '../theme/app_theme.dart';
+import '../utils/format.dart';
+import '../widgets/app_widgets.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -66,56 +69,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Widget buildSmallStat({
-    required String label,
-    required String value,
-  }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.05),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: Colors.white.withOpacity(0.06),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 10,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget buildSectionTitle(String title) {
-    return Text(
-      title,
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 18,
-        fontWeight: FontWeight.w800,
-      ),
-    );
-  }
-
   Widget buildActivityTile({
     required IconData icon,
     required Color color,
@@ -123,57 +76,176 @@ class _HomePageState extends State<HomePage> {
     required String subtitle,
     required String trailing,
   }) {
-    return Container(
+    return AppCard(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.06),
-        ),
-      ),
+      padding: const EdgeInsets.all(14),
       child: Row(
         children: [
           Container(
-            width: 38,
-            height: 38,
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.16),
-              borderRadius: BorderRadius.circular(12),
+              color: color.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(icon, color: color, size: 18),
+            child: Icon(icon, color: color, size: 20),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(title, style: AppText.subtitle),
+                const SizedBox(height: 3),
+                Text(subtitle, style: AppText.bodySecondary),
+              ],
+            ),
+          ),
+          Text(trailing, style: AppText.overline),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    final initial = _userName.isNotEmpty ? _userName[0].toUpperCase() : 'R';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              gradient: AppColors.brandGradient,
+              shape: BoxShape.circle,
+            ),
+            child: Text(initial, style: AppText.stat(18)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Welcome back', style: AppText.caption),
+                const SizedBox(height: 3),
                 Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 11,
-                  ),
+                  _userName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.title,
                 ),
               ],
             ),
           ),
-          Text(
-            trailing,
-            style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
+          IconCircleButton(
+            icon: Icons.refresh_rounded,
+            onTap: _loadHomeData,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHero() {
+    final hasArea = _totalRuns > 0 && _territoryArea > 0;
+    final area = Fmt.area(_territoryArea);
+
+    final heroText = _totalRuns == 0
+        ? 'Start your first run today'
+        : _territoryArea > 0
+            ? ''
+            : '$_totalRuns runs completed';
+
+    final heroSubtext = _totalRuns == 0
+        ? 'Complete your first run to start building your zone.'
+        : _territoryArea > 0
+            ? 'You covered ${_totalDistanceKm.toStringAsFixed(2)} km and claimed territory.'
+            : 'You covered ${_totalDistanceKm.toStringAsFixed(2)} km overall.';
+
+    return HeroCard(
+      padding: const EdgeInsets.fromLTRB(22, 22, 22, 24),
+      child: _isLoading
+          ? const SizedBox(
+              height: 96,
+              child: Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2.4,
+                  ),
+                ),
+              ),
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'YOUR TERRITORY',
+                  style: AppText.overline.copyWith(
+                    color: Colors.white.withValues(alpha: 0.75),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                if (hasArea)
+                  Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(text: area.value, style: AppText.stat(48)),
+                        TextSpan(
+                          text: ' ${area.unit}',
+                          style: AppText.stat(
+                            20,
+                            weight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Text(heroText, style: AppText.headline),
+                const SizedBox(height: 10),
+                Text(
+                  heroSubtext,
+                  style: AppText.body.copyWith(
+                    color: Colors.white.withValues(alpha: 0.88),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildStatsCard() {
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+      child: Row(
+        children: [
+          Expanded(
+            child: StatBlock(
+              value: _isLoading ? '--' : _totalDistanceKm.toStringAsFixed(2),
+              unit: 'KM',
+              label: 'Distance',
+            ),
+          ),
+          const StatDivider(),
+          Expanded(
+            child: StatBlock(
+              value: _isLoading ? '--' : _totalRuns.toString(),
+              label: 'Runs',
+            ),
+          ),
+          const StatDivider(),
+          Expanded(
+            child: StatBlock(
+              value: _isLoading ? '--' : _avgSpeed.toStringAsFixed(1),
+              unit: 'KM/H',
+              label: 'Avg speed',
+              accent: true,
             ),
           ),
         ],
@@ -181,298 +253,109 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  String _formatArea(double sqm) {
-    if (sqm >= 1000000) {
-      return '${(sqm / 1000000).toStringAsFixed(2)} km²';
-    } else if (sqm >= 1000) {
-      return '${(sqm / 1000).toStringAsFixed(1)}k m²';
-    }
-    return '${sqm.toStringAsFixed(0)} m²';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    const bgTop = Color(0xFF1A1A1A);
-    const bgBody = Color(0xFF050505);
-    const accent = Color(0xFF3B82F6);
-    const accentLight = Color(0xFF60A5FA);
-    const green = Color(0xFF22C55E);
-    const red = Color(0xFFEF4444);
-
+  Widget _buildMission() {
     final missionProgress = _totalRuns == 0
         ? 0.0
         : _totalRuns >= 5
             ? 1.0
             : _totalRuns / 5.0;
+    final runsDone = _totalRuns >= 5 ? 5 : _totalRuns;
 
-    final territoryText = _totalRuns == 0
-        ? 'Start your first run today'
-        : _territoryArea > 0
-            ? '${_formatArea(_territoryArea)} claimed'
-            : '${_totalRuns} runs completed';
+    return AppCard(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: AppColors.pink.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: const Icon(
+                  Icons.flag_rounded,
+                  color: AppColors.pink,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text('Secure Main Loop', style: AppText.subtitle)),
+              Text('$runsDone/5 RUNS', style: AppText.overline),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _totalRuns == 0
+                ? 'Complete your first run to activate your mission.'
+                : 'Keep running to improve your total distance and control.',
+            style: AppText.bodySecondary,
+          ),
+          const SizedBox(height: 14),
+          GradientProgressBar(value: missionProgress),
+        ],
+      ),
+    );
+  }
 
-    final territorySubtext = _totalRuns == 0
-        ? 'Complete your first run to start building your zone.'
-        : _territoryArea > 0
-            ? 'You covered ${_totalDistanceKm.toStringAsFixed(2)} km and claimed territory.'
-            : 'You covered ${_totalDistanceKm.toStringAsFixed(2)} km overall.';
-
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bgBody,
+      backgroundColor: AppColors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            Container(
-              color: bgTop,
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              child: Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.06),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.08),
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.person_outline,
-                      color: Colors.white,
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Welcome back',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 10,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _userName,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: _loadHomeData,
-                    child: Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.06),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.08),
-                        ),
-                      ),
-                      child: const Icon(
-                        Icons.refresh_rounded,
-                        color: Colors.white,
-                        size: 18,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            _buildHeader(),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _loadHomeData,
-                color: accent,
+                color: AppColors.pink,
+                backgroundColor: AppColors.surfaceHigh,
                 child: SingleChildScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (_error != null)
                         Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Text(
-                            _error!,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 11,
-                            ),
-                          ),
+                          padding: const EdgeInsets.only(bottom: 14),
+                          child: ErrorBanner(_error!),
                         ),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [
-                              accent,
-                              accentLight,
-                            ],
-                          ),
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: _isLoading
-                            ? const Center(
-                                child: Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 8),
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2.2,
-                                  ),
-                                ),
-                              )
-                            : Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Your Territory',
-                                    style: TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    territoryText,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    territorySubtext,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                      ),
+                      _buildHero(),
                       const SizedBox(height: 14),
-                      if (_isLoading)
-                        Row(
-                          children: [
-                            buildSmallStat(label: 'This Week', value: '--'),
-                            const SizedBox(width: 8),
-                            buildSmallStat(label: 'Runs', value: '--'),
-                            const SizedBox(width: 8),
-                            buildSmallStat(label: 'Avg Speed', value: '--'),
-                          ],
-                        )
-                      else
-                        Row(
-                          children: [
-                            buildSmallStat(
-                              label: 'Distance',
-                              value: '${_totalDistanceKm.toStringAsFixed(2)} km',
-                            ),
-                            const SizedBox(width: 8),
-                            buildSmallStat(
-                              label: 'Runs',
-                              value: _totalRuns.toString(),
-                            ),
-                            const SizedBox(width: 8),
-                            buildSmallStat(
-                              label: 'Avg Speed',
-                              value: _avgSpeed.toStringAsFixed(1),
-                            ),
-                          ],
-                        ),
-                      const SizedBox(height: 18),
-                      buildSectionTitle('Today’s mission'),
-                      const SizedBox(height: 10),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.05),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.06),
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Row(
-                              children: [
-                                Icon(
-                                  Icons.flag_rounded,
-                                  color: accent,
-                                  size: 16,
-                                ),
-                                SizedBox(width: 6),
-                                Text(
-                                  'Secure Main Loop',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _totalRuns == 0
-                                  ? 'Complete your first run to activate your mission.'
-                                  : 'Keep running to improve your total distance and control.',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 11,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: LinearProgressIndicator(
-                                value: missionProgress,
-                                minHeight: 6,
-                                backgroundColor: Colors.white12,
-                                color: accent,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      buildSectionTitle('Recent activity'),
-                      const SizedBox(height: 10),
+                      _buildStatsCard(),
+                      const SizedBox(height: 26),
+                      const SectionTitle('Today’s mission'),
+                      const SizedBox(height: 12),
+                      _buildMission(),
+                      const SizedBox(height: 26),
+                      const SectionTitle('Recent activity'),
+                      const SizedBox(height: 12),
                       buildActivityTile(
                         icon: Icons.route_rounded,
-                        color: accent,
+                        color: AppColors.pink,
                         title: 'Total distance',
                         subtitle:
                             '${_totalDistanceKm.toStringAsFixed(2)} km covered so far',
-                        trailing: 'Live',
+                        trailing: 'LIVE',
                       ),
                       buildActivityTile(
-                        icon: Icons.directions_run,
-                        color: green,
+                        icon: Icons.directions_run_rounded,
+                        color: AppColors.purple,
                         title: 'Runs completed',
                         subtitle: 'You have finished $_totalRuns runs',
-                        trailing: 'Now',
+                        trailing: 'NOW',
                       ),
                       buildActivityTile(
                         icon: Icons.speed_rounded,
-                        color: red,
+                        color: AppColors.gold,
                         title: 'Average speed',
-                        subtitle: 'Current average speed is ${_avgSpeed.toStringAsFixed(1)}',
-                        trailing: 'Stats',
+                        subtitle:
+                            'Current average speed is ${_avgSpeed.toStringAsFixed(1)} km/h',
+                        trailing: 'STATS',
                       ),
                     ],
                   ),

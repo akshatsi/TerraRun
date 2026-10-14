@@ -3,6 +3,9 @@ import 'location_test_page.dart';
 import 'run_history_page.dart';
 import '../services/auth_service.dart';
 import '../services/stats_service.dart';
+import '../theme/app_theme.dart';
+import '../utils/format.dart';
+import '../widgets/app_widgets.dart';
 import 'login_page.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -13,14 +16,33 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
+  static const _monthNames = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+
+  static const _weekdayInitials = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
   bool _isLoading = true;
   String? _error;
+
+  String _userName = 'Runner';
+  String? _userEmail;
 
   double _totalDistanceKm = 0.0;
   int _totalRuns = 0;
   double _avgSpeed = 0.0;
 
-  List<dynamic> _runs = [];
   Map<String, int> _runsPerDay = {};
   List<double> _weeklyDistances = List.filled(7, 0.0);
 
@@ -36,10 +58,14 @@ class _ProfilePageState extends State<ProfilePage> {
       _error = null;
     });
 
+    final userName = await AuthService.getUserName();
+    final userEmail = await AuthService.getUserEmail();
     final statsResult = await StatsService.getProfileStats();
     final runsResult = await StatsService.getAllRuns();
 
     if (!mounted) return;
+
+    final name = (userName == null || userName.isEmpty) ? 'Runner' : userName;
 
     if (statsResult['success'] == true && runsResult['success'] == true) {
       final stats = statsResult['data'] as Map<String, dynamic>;
@@ -63,8 +89,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
         if (createdAt == null) continue;
 
-        final dateKey =
-            '${createdAt.year.toString().padLeft(4, '0')}-${createdAt.month.toString().padLeft(2, '0')}-${createdAt.day.toString().padLeft(2, '0')}';
+        final dateKey = Fmt.dateKey(createdAt);
 
         runsPerDay[dateKey] = (runsPerDay[dateKey] ?? 0) + 1;
 
@@ -79,16 +104,19 @@ class _ProfilePageState extends State<ProfilePage> {
       }
 
       setState(() {
+        _userName = name;
+        _userEmail = userEmail;
         _totalDistanceKm = (stats['total_distance_km'] ?? 0).toDouble();
         _totalRuns = (stats['total_runs'] ?? 0) as int;
         _avgSpeed = (stats['avg_speed'] ?? 0).toDouble();
-        _runs = runs;
         _runsPerDay = runsPerDay;
         _weeklyDistances = weeklyDistances;
         _isLoading = false;
       });
     } else {
       setState(() {
+        _userName = name;
+        _userEmail = userEmail;
         _error = statsResult['message']?.toString() ??
             runsResult['message']?.toString() ??
             'Failed to load profile data';
@@ -97,44 +125,74 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Widget buildTopIconButton(IconData icon) {
-    return Container(
-      width: 36,
-      height: 36,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: Colors.white.withOpacity(0.08),
+  Widget _buildIdentity() {
+    final initial = _userName.isNotEmpty ? _userName[0].toUpperCase() : 'R';
+
+    return Row(
+      children: [
+        Container(
+          width: 64,
+          height: 64,
+          alignment: Alignment.center,
+          decoration: const BoxDecoration(
+            gradient: AppColors.territoryGradient,
+            shape: BoxShape.circle,
+          ),
+          child: Text(initial, style: AppText.stat(26)),
         ),
-      ),
-      child: Icon(
-        icon,
-        color: Colors.white,
-        size: 18,
-      ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _userName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.headline,
+              ),
+              if (_userEmail != null && _userEmail!.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  _userEmail!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.bodySecondary,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
     );
   }
 
-  Widget buildWeeklyStat(String label, String value) {
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildStatsCard() {
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+      child: Row(
         children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 10,
+          Expanded(
+            child: StatBlock(
+              value: _totalDistanceKm.toStringAsFixed(2),
+              unit: 'KM',
+              label: 'Distance',
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
+          const StatDivider(),
+          Expanded(
+            child: StatBlock(
+              value: _totalRuns.toString(),
+              label: 'Runs',
+            ),
+          ),
+          const StatDivider(),
+          Expanded(
+            child: StatBlock(
+              value: _avgSpeed.toStringAsFixed(1),
+              unit: 'KM/H',
+              label: 'Avg speed',
+              accent: true,
             ),
           ),
         ],
@@ -142,495 +200,197 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget buildMonthLabel(String text) {
-    return Text(
-      text,
-      style: const TextStyle(
-        color: Colors.white70,
-        fontSize: 11,
-      ),
-    );
-  }
+  Widget _buildWeeklyChart() {
+    final now = DateTime.now();
 
-  Widget buildCalendarDay(String text, String dateKey) {
-  final hasRun = _runsPerDay.containsKey(dateKey);
+    // Oldest day first, today last.
+    final labels = List.generate(7, (i) {
+      final day = now.subtract(Duration(days: 6 - i));
+      return i == 6 ? 'Today' : _weekdayInitials[day.weekday - 1];
+    });
 
-  final today = DateTime.now();
-  final todayKey =
-      '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-
-  final isToday = dateKey == todayKey;
-
-  return Container(
-    width: 32,
-    height: 32,
-    alignment: Alignment.center,
-    decoration: BoxDecoration(
-      color: isToday
-          ? const Color(0xFF3B82F6) // 🔵 today highlight
-          : hasRun
-              ? const Color(0xFF3B82F6).withOpacity(0.6)
-              : Colors.transparent,
-      shape: BoxShape.circle,
-      border: Border.all(
-        color: isToday
-            ? const Color(0xFF3B82F6)
-            : hasRun
-                ? const Color(0xFF3B82F6)
-                : Colors.white24,
-        width: isToday ? 2 : 1.2,
-      ),
-    ),
-    child: Text(
-      text,
-      style: TextStyle(
-        color: Colors.white,
-        fontSize: 11,
-        fontWeight:
-            isToday ? FontWeight.w900 : FontWeight.w500, // ⭐ bold today
-      ),
-    ),
-  );
-}
-
-  Widget buildWeekRow(List<Widget> children) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: children,
-      ),
-    );
-  }
-
-  Widget buildLocationAccessCard(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const LocationTestPage(),
-          ),
-        );
-      },
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.05),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: Colors.white.withOpacity(0.08),
-          ),
-        ),
-        child: const Row(
-          children: [
-            Icon(
-              Icons.location_on_rounded,
-              color: Color(0xFF3B82F6),
-              size: 18,
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(8, 18, 8, 14),
+      child: Column(
+        children: [
+          SizedBox(
+            height: 120,
+            child: CustomPaint(
+              size: Size.infinite,
+              painter: ProgressGraphPainter(_weeklyDistances),
             ),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Location Access',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (int i = 0; i < labels.length; i++)
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      labels[i],
+                      maxLines: 1,
+                      style: AppText.caption.copyWith(
+                        fontSize: 10,
+                        color: i == 6 ? AppColors.pink : AppColors.textMuted,
+                        fontWeight: i == 6 ? FontWeight.w700 : FontWeight.w600,
+                      ),
+                    ),
+                  ),
                 ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildCalendarDay(int day, String dateKey) {
+    final hasRun = _runsPerDay.containsKey(dateKey);
+    final isToday = dateKey == Fmt.dateKey(DateTime.now());
+
+    return Container(
+      width: 36,
+      height: 36,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        gradient: isToday || hasRun ? AppColors.brandGradient : null,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: isToday
+              ? Colors.white
+              : hasRun
+                  ? Colors.transparent
+                  : AppColors.border,
+          width: isToday ? 1.6 : 1,
+        ),
+      ),
+      child: Text(
+        '$day',
+        style: AppText.caption.copyWith(
+          fontSize: 12,
+          color: isToday || hasRun ? Colors.white : AppColors.textSecondary,
+          fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCalendar() {
+    final now = DateTime.now();
+    final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+    // DateTime.weekday: Monday = 1, so Monday-first needs weekday - 1 blanks.
+    final leadingBlanks = DateTime(now.year, now.month, 1).weekday - 1;
+    final cellCount = ((leadingBlanks + daysInMonth + 6) ~/ 7) * 7;
+
+    final cells = List<Widget>.generate(cellCount, (i) {
+      final day = i - leadingBlanks + 1;
+      if (day < 1 || day > daysInMonth) {
+        return const SizedBox(width: 36, height: 36);
+      }
+      return buildCalendarDay(day, Fmt.dateKey(DateTime(now.year, now.month, day)));
+    });
+
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              for (final d in _weekdayInitials)
+                SizedBox(
+                  width: 36,
+                  child: Center(child: Text(d, style: AppText.overline)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          for (int row = 0; row < cellCount ~/ 7; row++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: cells.sublist(row * 7, row * 7 + 7),
               ),
             ),
-            Icon(
-              Icons.arrow_forward_ios_rounded,
-              color: Colors.white54,
-              size: 12,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget buildRunHistoryCard(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const RunHistoryPage(),
-          ),
-        );
-      },
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        margin: const EdgeInsets.only(bottom: 12),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.05),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: Colors.white.withOpacity(0.08),
-          ),
-        ),
-        child: const Row(
-          children: [
-            Icon(
-              Icons.history_rounded,
-              color: Color(0xFF3B82F6),
-              size: 18,
-            ),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Run History',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            Icon(
-              Icons.arrow_forward_ios_rounded,
-              color: Colors.white54,
-              size: 12,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget buildLogoutCard(BuildContext context) {
-    return GestureDetector(
-      onTap: () async {
-        await AuthService.logout();
-
-        if (!context.mounted) return;
-
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const LoginPage(),
-          ),
-          (route) => false,
-        );
-      },
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        margin: const EdgeInsets.only(bottom: 12),
-        decoration: BoxDecoration(
-          color: Colors.red.withOpacity(0.10),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: Colors.red.withOpacity(0.25),
-          ),
-        ),
-        child: const Row(
-          children: [
-            Icon(
-              Icons.logout_rounded,
-              color: Colors.redAccent,
-              size: 18,
-            ),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Logout',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            Icon(
-              Icons.arrow_forward_ios_rounded,
-              color: Colors.white54,
-              size: 12,
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }
 
   Widget buildProgressView(BuildContext context) {
-    const accent = Color(0xFF3B82F6);
+    final now = DateTime.now();
 
     return RefreshIndicator(
       onRefresh: _loadProfileData,
-      color: accent,
+      color: AppColors.pink,
+      backgroundColor: AppColors.surfaceHigh,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(0, 0, 0, 18),
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: accent,
-                  width: 1.2,
-                ),
-                borderRadius: BorderRadius.circular(22),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.directions_run,
-                    color: accent,
-                    size: 16,
-                  ),
-                  SizedBox(width: 6),
-                  Text(
-                    'Run',
-                    style: TextStyle(
-                      color: accent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'Your stats',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 14),
+            _buildIdentity(),
+            const SizedBox(height: 24),
             if (_isLoading)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 20),
-                  child: CircularProgressIndicator(
-                    color: accent,
-                  ),
-                ),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 40),
+                child: Center(child: AppLoader(size: 28)),
               )
             else if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Text(
-                  _error!,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                  ),
-                ),
-              )
-            else
-              Row(
-                children: [
-                  buildWeeklyStat(
-                    'Distance',
-                    '${_totalDistanceKm.toStringAsFixed(2)} km',
-                  ),
-                  buildWeeklyStat(
-                    'Avg speed',
-                    _avgSpeed.toStringAsFixed(1),
-                  ),
-                  buildWeeklyStat(
-                    'Runs',
-                    _totalRuns.toString(),
-                  ),
-                ],
+              ErrorBanner(_error!)
+            else ...[
+              _buildStatsCard(),
+              const SizedBox(height: 26),
+              const SectionTitle('Past 7 days'),
+              const SizedBox(height: 12),
+              _buildWeeklyChart(),
+              const SizedBox(height: 26),
+              SectionTitle(
+                '${_monthNames[now.month - 1]} ${now.year}',
+                trailing: Text('RUN DAYS', style: AppText.overline),
               ),
-            const SizedBox(height: 20),
-            const Text(
-              'Past 7 days',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 11,
-              ),
+              const SizedBox(height: 12),
+              _buildCalendar(),
+            ],
+            const SizedBox(height: 26),
+            MenuTile(
+              icon: Icons.history_rounded,
+              title: 'Run history',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const RunHistoryPage()),
+                );
+              },
             ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 128,
-              child: Stack(
-                children: [
-                  Column(
-                    children: [
-                      Expanded(
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            border: Border(
-                              top: BorderSide(color: Colors.white24),
-                              bottom: BorderSide(color: Colors.white24),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            border: Border(
-                              bottom: BorderSide(color: Colors.white24),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                    ],
-                  ),
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: ProgressGraphPainter(_weeklyDistances),
-                    ),
-                  ),
-                  Positioned(
-                    left: 0,
-                    right: 24,
-                    bottom: 0,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: const [
-                        Text('6d', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                        Text('5d', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                        Text('4d', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                        Text('3d', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                        Text('2d', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                        Text('1d', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                        Text('Now', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+            MenuTile(
+              icon: Icons.location_on_rounded,
+              title: 'Location access',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LocationTestPage()),
+                );
+              },
             ),
-            const SizedBox(height: 18),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'This month',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: Colors.white12),
-                    color: Colors.white.withOpacity(0.03),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.ios_share, color: Colors.white38, size: 12),
-                      SizedBox(width: 5),
-                      Text(
-                        'Share',
-                        style: TextStyle(
-                          color: Colors.white38,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            MenuTile(
+              icon: Icons.logout_rounded,
+              title: 'Log out',
+              danger: true,
+              onTap: () async {
+                await AuthService.logout();
+
+                if (!context.mounted) return;
+
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                  (route) => false,
+                );
+              },
             ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                buildWeeklyStat(
-                  'Total runs',
-                  _totalRuns.toString(),
-                ),
-                buildWeeklyStat(
-                  'Distance',
-                  '${_totalDistanceKm.toStringAsFixed(2)} km',
-                ),
-                buildWeeklyStat(
-                  'Avg speed',
-                  _avgSpeed.toStringAsFixed(1),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 4),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('M', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  Text('T', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  Text('W', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  Text('T', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  Text('F', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  Text('S', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  Text('S', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            buildWeekRow([
-              buildCalendarDay('1', '2026-04-01'),
-              buildCalendarDay('2', '2026-04-02'),
-              buildCalendarDay('3', '2026-04-03'),
-              buildCalendarDay('4', '2026-04-04'),
-              buildCalendarDay('5', '2026-04-05'),
-              buildCalendarDay('6', '2026-04-06'),
-              buildCalendarDay('7', '2026-04-07'),
-            ]),
-            buildWeekRow([
-              buildCalendarDay('8', '2026-04-08'),
-              buildCalendarDay('9', '2026-04-09'),
-              buildCalendarDay('10', '2026-04-10'),
-              buildCalendarDay('11', '2026-04-11'),
-              buildCalendarDay('12', '2026-04-12'),
-              buildCalendarDay('13', '2026-04-13'),
-              buildCalendarDay('14', '2026-04-14'),
-            ]),
-            buildWeekRow([
-              buildCalendarDay('15', '2026-04-15'),
-              buildCalendarDay('16', '2026-04-16'),
-              buildCalendarDay('17', '2026-04-17'),
-              buildCalendarDay('18', '2026-04-18'),
-              buildCalendarDay('19', '2026-04-19'),
-              buildCalendarDay('20', '2026-04-20'),
-              buildCalendarDay('21', '2026-04-21'),
-            ]),
-            buildWeekRow([
-              buildCalendarDay('22', '2026-04-22'),
-              buildCalendarDay('23', '2026-04-23'),
-              buildCalendarDay('24', '2026-04-24'),
-              buildCalendarDay('25', '2026-04-25'),
-              buildCalendarDay('26', '2026-04-26'),
-              buildCalendarDay('27', '2026-04-27'),
-              buildCalendarDay('28', '2026-04-28'),
-            ]),
-            buildWeekRow([
-              buildCalendarDay('29', '2026-04-29'),
-              buildCalendarDay('30', '2026-04-30'),
-              buildCalendarDay('1', '2026-05-01'),
-              buildCalendarDay('2', '2026-05-02'),
-              buildCalendarDay('3', '2026-05-03'),
-              buildCalendarDay('4', '2026-05-04'),
-              buildCalendarDay('5', '2026-05-05'),
-            ]),
-            const SizedBox(height: 16),
-            buildRunHistoryCard(context),
-            buildLocationAccessCard(context),
-            const SizedBox(height: 12),
-            buildLogoutCard(context),
           ],
         ),
       ),
@@ -639,44 +399,20 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    const bgTop = Color(0xFF1A1A1A);
-    const bgBody = Color(0xFF050505);
-
     return Scaffold(
-      backgroundColor: bgBody,
+      backgroundColor: AppColors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            Container(
-              color: bgTop,
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              child: Row(
-                children: [
-                  buildTopIconButton(Icons.person_outline),
-                  const Spacer(),
-                  const Text(
-                    'Profile',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: _loadProfileData,
-                    child: buildTopIconButton(Icons.refresh_rounded),
-                  ),
-                ],
+            ScreenHeader(
+              title: 'Profile',
+              leading: const IconCircleButton(icon: Icons.person_outline_rounded),
+              trailing: IconCircleButton(
+                icon: Icons.refresh_rounded,
+                onTap: _loadProfileData,
               ),
             ),
-            Expanded(
-              child: Container(
-                color: bgBody,
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                child: buildProgressView(context),
-              ),
-            ),
+            Expanded(child: buildProgressView(context)),
           ],
         ),
       ),
@@ -691,55 +427,78 @@ class ProgressGraphPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    const accent = Color(0xFF3B82F6);
+    if (weeklyDistances.isEmpty) return;
 
-    final linePaint = Paint()
-      ..color = accent
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
+    final maxRaw = weeklyDistances.reduce((a, b) => a > b ? a : b);
+    final maxValue = maxRaw == 0 ? 1.0 : maxRaw;
 
-    final dotPaint = Paint()
-      ..color = accent
-      ..style = PaintingStyle.fill;
+    // Faint guide lines.
+    final guide = Paint()
+      ..color = Colors.white.withValues(alpha: 0.08)
+      ..strokeWidth = 1;
+    for (int i = 0; i < 3; i++) {
+      final y = size.height * (0.15 + i * 0.35);
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), guide);
+    }
 
-    final glowPaint = Paint()
-      ..color = accent.withOpacity(0.22)
-      ..style = PaintingStyle.fill;
-
-    final maxValue = weeklyDistances.isEmpty
-        ? 1.0
-        : weeklyDistances.reduce((a, b) => a > b ? a : b) == 0
-            ? 1.0
-            : weeklyDistances.reduce((a, b) => a > b ? a : b);
-
+    // One point per day, centred in its column so labels line up.
+    final slot = size.width / weeklyDistances.length;
     final List<Offset> points = [];
 
     for (int i = 0; i < weeklyDistances.length; i++) {
-      final x = size.width * (i / (weeklyDistances.length - 1));
+      final x = slot * (i + 0.5);
       final normalized = weeklyDistances[i] / maxValue;
-      final y = size.height * (0.80 - (normalized * 0.45));
+      final y = size.height * (0.85 - (normalized * 0.65));
       points.add(Offset(x, y));
     }
 
-    if (points.isEmpty) return;
-
-    final path = Path()..moveTo(points.first.dx, points.first.dy);
-
+    final line = Path()..moveTo(points.first.dx, points.first.dy);
     for (int i = 1; i < points.length; i++) {
-      path.lineTo(points[i].dx, points[i].dy);
+      line.lineTo(points[i].dx, points[i].dy);
     }
 
-    canvas.drawPath(path, linePaint);
+    final fill = Path.from(line)
+      ..lineTo(points.last.dx, size.height)
+      ..lineTo(points.first.dx, size.height)
+      ..close();
 
+    canvas.drawPath(
+      fill,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            AppColors.pink.withValues(alpha: 0.3),
+            AppColors.pink.withValues(alpha: 0.0),
+          ],
+        ).createShader(Offset.zero & size),
+    );
+
+    canvas.drawPath(
+      line,
+      Paint()
+        ..color = AppColors.pink
+        ..strokeWidth = 2.5
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+
+    final dotPaint = Paint()..color = AppColors.pink;
     for (int i = 0; i < points.length - 1; i++) {
       canvas.drawCircle(points[i], 3.5, dotPaint);
     }
 
-    canvas.drawCircle(points.last, 10, glowPaint);
+    canvas.drawCircle(
+      points.last,
+      10,
+      Paint()..color = AppColors.pink.withValues(alpha: 0.25),
+    );
     canvas.drawCircle(points.last, 5.5, dotPaint);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+  bool shouldRepaint(covariant ProgressGraphPainter oldDelegate) =>
+      oldDelegate.weeklyDistances != weeklyDistances;
 }

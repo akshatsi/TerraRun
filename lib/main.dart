@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'screens/login_page.dart';
 import 'screens/main_navigation.dart';
 import 'services/auth_service.dart';
+import 'theme/app_theme.dart';
+import 'widgets/app_widgets.dart';
 
 void main() {
   runApp(const MyApp());
@@ -15,7 +17,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'TerraRun',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(),
+      theme: AppTheme.dark(),
       home: const AppStartPage(),
     );
   }
@@ -56,10 +58,15 @@ class _AppStartPageState extends State<AppStartPage> {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      backgroundColor: Color(0xFF050505),
+      backgroundColor: AppColors.bg,
       body: Center(
-        child: CircularProgressIndicator(
-          color: Color(0xFF3B82F6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Wordmark(size: 22),
+            SizedBox(height: 28),
+            AppLoader(),
+          ],
         ),
       ),
     );

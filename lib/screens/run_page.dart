@@ -5,6 +5,10 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../data/run_data.dart';
 import '../services/run_service.dart';
+import '../theme/app_theme.dart';
+import '../utils/format.dart';
+import '../widgets/app_widgets.dart';
+import '../widgets/map_tiles.dart';
 
 class RunPage extends StatefulWidget {
   const RunPage({super.key});
@@ -255,162 +259,68 @@ class _RunPageState extends State<RunPage> {
     });
   }
 
-  String formatTime(int totalSeconds) {
-    final hours = totalSeconds ~/ 3600;
-    final minutes = (totalSeconds % 3600) ~/ 60;
-    final seconds = totalSeconds % 60;
-
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-
-    if (hours > 0) {
-      return '${twoDigits(hours)}:${twoDigits(minutes)}:${twoDigits(seconds)}';
-    }
-    return '${twoDigits(minutes)}:${twoDigits(seconds)}';
-  }
+  String formatTime(int totalSeconds) => Fmt.duration(totalSeconds);
 
   Widget buildTopBanner() {
-    const blue = Color(0xFF3B82F6);
-    const blueDark = Color(0xFF1D4ED8);
-
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.78),
-        borderRadius: BorderRadius.circular(18),
+        color: AppColors.surface.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(999),
         border: Border.all(
           color: isRunning
-              ? blueDark.withOpacity(0.8)
-              : Colors.white.withOpacity(0.08),
+              ? AppColors.pink.withValues(alpha: 0.6)
+              : AppColors.border,
         ),
       ),
       child: Row(
         children: [
           Container(
-            width: 34,
-            height: 34,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
               color: isRunning
-                  ? blueDark.withOpacity(0.45)
-                  : Colors.white.withOpacity(0.08),
+                  ? AppColors.pink.withValues(alpha: 0.18)
+                  : Colors.white.withValues(alpha: 0.08),
               shape: BoxShape.circle,
             ),
             child: Icon(
               isRunning ? Icons.gps_fixed : Icons.location_searching,
-              color: isRunning ? blue : Colors.white70,
+              color: isRunning ? AppColors.pink : AppColors.textSecondary,
               size: 18,
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Text(
-              isRunning ? 'GPS Acquired' : statusText,
-              style: TextStyle(
-                color: isRunning ? blue : Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
+              isRunning ? 'GPS acquired' : statusText,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.subtitle.copyWith(
+                color: isRunning ? AppColors.pink : Colors.white,
               ),
             ),
           ),
-          IconButton(
-            onPressed: () {
+          IconCircleButton(
+            icon: Icons.my_location_rounded,
+            size: 36,
+            onTap: () {
               mapController.move(currentLatLng, 17);
             },
-            icon: const Icon(Icons.my_location, color: Colors.white, size: 18),
           ),
         ],
       ),
-    );
-  }
-
-  Widget buildStatsCard() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.84),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _metricBlock(
-              formatTime(secondsElapsed),
-              'Time',
-            ),
-          ),
-          Expanded(
-            child: _metricBlock(
-              avgSpeed.toStringAsFixed(1),
-              'Avg speed',
-              centerBig: true,
-            ),
-          ),
-          Expanded(
-            child: _metricBlock(
-              distanceKm.toStringAsFixed(2),
-              'Distance',
-              alignEnd: true,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _metricBlock(
-    String value,
-    String label, {
-    bool centerBig = false,
-    bool alignEnd = false,
-  }) {
-    CrossAxisAlignment align = CrossAxisAlignment.start;
-    TextAlign textAlign = TextAlign.left;
-
-    if (centerBig) {
-      align = CrossAxisAlignment.center;
-      textAlign = TextAlign.center;
-    } else if (alignEnd) {
-      align = CrossAxisAlignment.end;
-      textAlign = TextAlign.right;
-    }
-
-    return Column(
-      crossAxisAlignment: align,
-      children: [
-        Text(
-          value,
-          textAlign: textAlign,
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: centerBig ? 30 : 18,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          label,
-          textAlign: textAlign,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
     );
   }
 
   Widget buildBottomPanel() {
-    const blue = Color(0xFF3B82F6);
-
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      decoration: const BoxDecoration(
-        color: Color(0xFF161616),
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(20),
-        ),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border.all(color: AppColors.border),
       ),
       child: SafeArea(
         top: false,
@@ -418,57 +328,66 @@ class _RunPageState extends State<RunPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 42,
+              width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.white38,
+                color: Colors.white.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(20),
               ),
             ),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: isSavingRun
-                    ? null
-                    : (isRunning ? stopRun : startRun),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: blue,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(56),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(32),
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
+            const SizedBox(height: 20),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: StatBlock(
+                    value: formatTime(secondsElapsed),
+                    label: 'Duration',
+                    valueSize: 20,
                   ),
                 ),
-                child: isSavingRun
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : Text(isRunning ? 'Stop Run' : 'Run'),
-              ),
+                Expanded(
+                  flex: 2,
+                  child: StatBlock(
+                    value: distanceKm.toStringAsFixed(2),
+                    unit: 'KM',
+                    label: 'Distance',
+                    valueSize: 44,
+                    accent: true,
+                    align: CrossAxisAlignment.center,
+                  ),
+                ),
+                Expanded(
+                  child: StatBlock(
+                    value: avgSpeed.toStringAsFixed(1),
+                    unit: 'KM/H',
+                    label: 'Avg speed',
+                    valueSize: 20,
+                    align: CrossAxisAlignment.end,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            if (!isRunning && !isSavingRun)
+            const SizedBox(height: 22),
+            GradientButton(
+              label: isRunning ? 'Stop run' : 'Start run',
+              icon: isRunning ? Icons.stop_rounded : Icons.play_arrow_rounded,
+              gradient: isRunning
+                  ? AppColors.dangerGradient
+                  : AppColors.brandGradient,
+              loading: isSavingRun,
+              onPressed: isSavingRun ? null : (isRunning ? stopRun : startRun),
+            ),
+            if (!isRunning && !isSavingRun) ...[
+              const SizedBox(height: 6),
               TextButton(
                 onPressed: resetRun,
-                child: const Text(
+                child: Text(
                   'Reset',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: AppText.caption.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),
+            ],
           ],
         ),
       ),
@@ -484,13 +403,11 @@ class _RunPageState extends State<RunPage> {
 
   @override
   Widget build(BuildContext context) {
-    const blue = Color(0xFF3B82F6);
-
     final hasLocation = RunDataStore.currentLatitude != null &&
         RunDataStore.currentLongitude != null;
 
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppColors.bg,
       body: Stack(
         children: [
           FlutterMap(
@@ -500,19 +417,14 @@ class _RunPageState extends State<RunPage> {
               initialZoom: hasLocation ? 17 : 15,
             ),
             children: [
-              TileLayer(
-                urlTemplate:
-                    'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
-                userAgentPackageName: 'com.example.fitness_game_app',
-              ),
+              buildBaseTileLayer(),
               if (latestPathPoints.length >= 2)
                 PolylineLayer(
                   polylines: [
                     Polyline(
                       points: latestPathPoints,
-                      strokeWidth: 4,
-                      color: blue,
+                      strokeWidth: 5,
+                      color: AppColors.pink,
                     ),
                   ],
                 ),
@@ -520,13 +432,19 @@ class _RunPageState extends State<RunPage> {
                 markers: [
                   Marker(
                     point: currentLatLng,
-                    width: 26,
-                    height: 26,
+                    width: 28,
+                    height: 28,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: blue,
+                        color: AppColors.pink,
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 3),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.pink.withValues(alpha: 0.55),
+                            blurRadius: 14,
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -534,16 +452,11 @@ class _RunPageState extends State<RunPage> {
               ),
             ],
           ),
-          Container(
-            color: Colors.black.withOpacity(0.08),
-          ),
           SafeArea(
             child: Column(
               children: [
                 buildTopBanner(),
                 const Spacer(),
-                buildStatsCard(),
-                const SizedBox(height: 12),
                 buildBottomPanel(),
               ],
             ),

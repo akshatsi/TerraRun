@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 import 'home_page.dart';
 import 'run_page.dart';
 import 'map_page.dart';
@@ -31,24 +32,65 @@ class _MainNavigationState extends State<MainNavigation> {
 
   @override
   Widget build(BuildContext context) {
-    const headerColor = Color(0xFF1A1A1A);
-    const accent = Color(0xFF3B82F6);
-
     return Scaffold(
       body: pages[selectedIndex],
       bottomNavigationBar: Container(
-        color: headerColor,
-        padding: const EdgeInsets.symmetric(vertical: 6),
+        decoration: const BoxDecoration(
+          color: AppColors.bg,
+          border: Border(top: BorderSide(color: AppColors.border)),
+        ),
         child: SafeArea(
           top: false,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+            child: Row(
+              children: [
+                navItem(Icons.home_outlined, Icons.home_rounded, 'Home', 0),
+                navItem(Icons.map_outlined, Icons.map_rounded, 'Map', 1),
+                runItem(),
+                navItem(
+                  Icons.emoji_events_outlined,
+                  Icons.emoji_events_rounded,
+                  'Ranks',
+                  3,
+                ),
+                navItem(
+                  Icons.person_outline_rounded,
+                  Icons.person_rounded,
+                  'Profile',
+                  4,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget navItem(IconData icon, IconData activeIcon, String label, int index) {
+    final bool isSelected = selectedIndex == index;
+    final color = isSelected ? AppColors.pink : AppColors.textMuted;
+
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => onItemTapped(index),
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              navItem(Icons.home_rounded, 'Home', 0, accent),
-              navItem(Icons.map_rounded, 'Map', 1, accent),
-              navItem(Icons.play_circle_fill_rounded, 'Run', 2, accent),
-              navItem(Icons.emoji_events_rounded, 'Leaderboard', 3, accent),
-              navItem(Icons.person_rounded, 'Profile', 4, accent),
+              Icon(isSelected ? activeIcon : icon, size: 24, color: color),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: AppText.caption.copyWith(
+                  fontSize: 10,
+                  color: color,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                ),
+              ),
             ],
           ),
         ),
@@ -56,31 +98,50 @@ class _MainNavigationState extends State<MainNavigation> {
     );
   }
 
-  Widget navItem(IconData icon, String label, int index, Color accent) {
-    final bool isSelected = selectedIndex == index;
+  Widget runItem() {
+    final bool isSelected = selectedIndex == 2;
 
-    return GestureDetector(
-      onTap: () => onItemTapped(index),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 20,
-              color: isSelected ? accent : Colors.white54,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: TextStyle(
-                color: isSelected ? accent : Colors.white54,
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => onItemTapped(2),
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  gradient: AppColors.brandGradient,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.magenta
+                          .withValues(alpha: isSelected ? 0.5 : 0.28),
+                      blurRadius: isSelected ? 20 : 12,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.directions_run_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 3),
+              Text(
+                'Run',
+                style: AppText.caption.copyWith(
+                  fontSize: 10,
+                  color: isSelected ? AppColors.pink : AppColors.textMuted,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

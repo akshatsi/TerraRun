@@ -5,6 +5,10 @@ import 'package:latlong2/latlong.dart';
 import '../data/run_data.dart';
 import '../services/stats_service.dart';
 import '../services/territory_service.dart';
+import '../theme/app_theme.dart';
+import '../utils/format.dart';
+import '../widgets/app_widgets.dart';
+import '../widgets/map_tiles.dart';
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -22,7 +26,9 @@ class _MapPageState extends State<MapPage> {
 
   double _totalDistance = 0.0;
   int _totalRuns = 0;
-  double _avgSpeed = 0.0;
+
+  // 0 = all players, 1 = only my territory
+  int _filterIndex = 0;
 
   // --- Territory data ---
   List<Map<String, dynamic>> _territories = [];
@@ -74,17 +80,14 @@ class _MapPageState extends State<MapPage> {
       final runs = result['data'] as List<dynamic>;
 
       double totalDistance = 0.0;
-      double totalSpeed = 0.0;
 
       for (final run in runs) {
         totalDistance += ((run['distance_km'] ?? 0) as num).toDouble();
-        totalSpeed += ((run['avg_speed'] ?? 0) as num).toDouble();
       }
 
       setState(() {
         _totalRuns = runs.length;
         _totalDistance = totalDistance;
-        _avgSpeed = runs.isEmpty ? 0.0 : totalSpeed / runs.length;
         _isLoadingStats = false;
       });
     } else {
@@ -161,15 +164,15 @@ class _MapPageState extends State<MapPage> {
 
   /// Generate a color for a given user_id (deterministic).
   Color _colorForUser(int userId, bool isMe) {
-    if (isMe) return const Color(0xFF3B82F6);
+    if (isMe) return AppColors.purple;
     const palette = [
-      Color(0xFFEF4444),
-      Color(0xFF22C55E),
-      Color(0xFFF59E0B),
-      Color(0xFF8B5CF6),
-      Color(0xFFEC4899),
-      Color(0xFF06B6D4),
-      Color(0xFFF97316),
+      Color(0xFFFF8A4C),
+      Color(0xFF3DD6B0),
+      Color(0xFFF5C542),
+      Color(0xFF5B8DEF),
+      Color(0xFF8BD450),
+      Color(0xFFFF5C7A),
+      Color(0xFF4CC9F0),
     ];
     return palette[userId % palette.length];
   }
@@ -180,56 +183,6 @@ class _MapPageState extends State<MapPage> {
     super.dispose();
   }
 
-  Widget topButton(IconData icon, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.72),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(icon, color: Colors.white, size: 18),
-      ),
-    );
-  }
-
-  Widget stat(String title, String value) {
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 10,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatArea(double sqm) {
-    if (sqm >= 1000000) {
-      return '${(sqm / 1000000).toStringAsFixed(2)} km²';
-    } else if (sqm >= 1000) {
-      return '${(sqm / 1000).toStringAsFixed(1)}k m²';
-    }
-    return '${sqm.toStringAsFixed(0)} m²';
-  }
-
   void _refreshAll() {
     _loadRuns();
     _loadTerritories();
@@ -237,8 +190,6 @@ class _MapPageState extends State<MapPage> {
 
   @override
   Widget build(BuildContext context) {
-    const accent = Color(0xFF3B82F6);
-
     // Build territory polygon layers
     final List<Polygon> territoryPolygons = [];
 
@@ -247,12 +198,13 @@ class _MapPageState extends State<MapPage> {
     for (final t in _territories) {
       final geojson = t['geojson'] as Map<String, dynamic>?;
       final userId = (t['user_id'] as num?)?.toInt() ?? 0;
-      final userName = t['user_name']?.toString() ?? '';
       final area = ((t['area_sq_m'] ?? 0) as num).toDouble();
 
       // Determine if this is the current user's territory
       // (we check if area matches our own territory area — simple approach)
       final isMe = area > 0 && (area - _myTerritoryArea).abs() < 1.0;
+
+      if (_filterIndex == 1 && !isMe) continue;
 
       final color = _colorForUser(userId, isMe);
       final polyPoints = _parseGeoJsonPolygons(geojson);
@@ -262,8 +214,8 @@ class _MapPageState extends State<MapPage> {
           territoryPolygons.add(
             Polygon(
               points: points,
-              color: color.withOpacity(0.25),
-              borderColor: color.withOpacity(0.7),
+              color: color.withValues(alpha: isMe ? 0.5 : 0.3),
+              borderColor: color.withValues(alpha: 0.85),
               borderStrokeWidth: 2,
             ),
           );
@@ -271,8 +223,26 @@ class _MapPageState extends State<MapPage> {
       }
     }
 
+    final statusText = _statsError != null
+        ? _statsError!
+        : RunDataStore.isRunActive
+            ? 'Live run tracking active'
+            : _totalRuns == 0
+                ? 'No runs saved yet'
+                : _myTerritoryArea > 0
+                    ? 'Your territory'
+                    : 'Runs completed';
+
+    final subText = _totalRuns == 0
+        ? 'Start your first run to claim territory'
+        : _myTerritoryArea > 0
+            ? '${_territories.length} players on the map'
+            : 'Total distance covered: ${_totalDistance.toStringAsFixed(2)} km';
+
+    final area = Fmt.area(_myTerritoryArea);
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppColors.bg,
       body: Stack(
         children: [
           FlutterMap(
@@ -282,12 +252,7 @@ class _MapPageState extends State<MapPage> {
               initialZoom: hasLiveLocation ? 16 : 14,
             ),
             children: [
-              TileLayer(
-                urlTemplate:
-                    'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
-                userAgentPackageName: 'com.example.fitness_game_app',
-              ),
+              buildBaseTileLayer(),
               // --- Territory polygons ---
               if (territoryPolygons.isNotEmpty)
                 PolygonLayer(polygons: territoryPolygons),
@@ -297,7 +262,7 @@ class _MapPageState extends State<MapPage> {
                     Polyline(
                       points: latestPathPoints,
                       strokeWidth: 4,
-                      color: accent,
+                      color: AppColors.pink,
                     ),
                   ],
                 ),
@@ -305,13 +270,19 @@ class _MapPageState extends State<MapPage> {
                 markers: [
                   Marker(
                     point: currentLatLng,
-                    width: 26,
-                    height: 26,
+                    width: 28,
+                    height: 28,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: accent,
+                        color: AppColors.pink,
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 3),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.pink.withValues(alpha: 0.55),
+                            blurRadius: 14,
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -319,68 +290,52 @@ class _MapPageState extends State<MapPage> {
               ),
             ],
           ),
-
           SafeArea(
             child: Column(
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                  child: Row(
-                    children: [
-                      topButton(Icons.layers_rounded, () {}),
-                      const Spacer(),
-                      const Text(
-                        'Map',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const Spacer(),
-                      topButton(Icons.refresh_rounded, _refreshAll),
-                    ],
+                  child: SegmentedPill(
+                    labels: const ['All players', 'My territory'],
+                    index: _filterIndex,
+                    onChanged: (i) => setState(() => _filterIndex = i),
                   ),
                 ),
-
-                const SizedBox(height: 10),
-
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.76),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Text(
-                      _statsError != null
-                          ? _statsError!
-                          : RunDataStore.isRunActive
-                              ? 'Live run tracking active'
-                              : _totalRuns == 0
-                                  ? 'No runs saved yet'
-                                  : _myTerritoryArea > 0
-                                      ? 'Your territory: ${_formatArea(_myTerritoryArea)}'
-                                      : 'You have completed $_totalRuns runs',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                    child: Align(
+                      alignment: Alignment.bottomRight,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconCircleButton(
+                            icon: Icons.refresh_rounded,
+                            solid: true,
+                            onTap: _refreshAll,
+                          ),
+                          const SizedBox(height: 10),
+                          IconCircleButton(
+                            icon: Icons.my_location_rounded,
+                            solid: true,
+                            onTap: () {
+                              if (hasLiveLocation) {
+                                mapController.move(currentLatLng, 17);
+                              }
+                            },
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
-
-                const Spacer(),
-
                 Container(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF111111),
-                    borderRadius: BorderRadius.vertical(
-                      top: Radius.circular(20),
-                    ),
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(28)),
+                    border: Border.all(color: AppColors.border),
                   ),
                   child: SafeArea(
                     top: false,
@@ -391,67 +346,79 @@ class _MapPageState extends State<MapPage> {
                           width: 40,
                           height: 4,
                           decoration: BoxDecoration(
-                            color: Colors.white38,
+                            color: Colors.white.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(20),
                           ),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Container(
+                              width: 42,
+                              height: 42,
+                              decoration: const BoxDecoration(
+                                gradient: AppColors.territoryGradient,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.flag_rounded,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(statusText, style: AppText.subtitle),
+                                  const SizedBox(height: 3),
+                                  Text(subText, style: AppText.bodySecondary),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+                        Container(height: 1, color: AppColors.border),
+                        const SizedBox(height: 18),
                         if (_isLoadingStats)
                           const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            child: CircularProgressIndicator(
-                              color: accent,
-                              strokeWidth: 2.2,
-                            ),
+                            padding: EdgeInsets.symmetric(vertical: 8),
+                            child: AppLoader(),
                           )
                         else
                           Row(
                             children: [
-                              stat('Runs', _totalRuns.toString()),
-                              stat(
-                                'Distance',
-                                '${_totalDistance.toStringAsFixed(2)} km',
-                              ),
-                              stat(
-                                'Territory',
-                                _myTerritoryArea > 0
-                                    ? _formatArea(_myTerritoryArea)
-                                    : '—',
-                              ),
-                            ],
-                          ),
-                        const SizedBox(height: 10),
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: accent.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.flag, color: accent, size: 14),
-                              const SizedBox(width: 6),
                               Expanded(
-                                child: Text(
-                                  _totalRuns == 0
-                                      ? 'Start your first run to claim territory'
-                                      : _myTerritoryArea > 0
-                                          ? 'Territory: ${_formatArea(_myTerritoryArea)} • ${_territories.length} players'
-                                          : 'Total distance covered: ${_totalDistance.toStringAsFixed(2)} km',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                  ),
+                                child: StatBlock(
+                                  value: _totalDistance.toStringAsFixed(2),
+                                  unit: 'KM',
+                                  label: 'Distance',
                                 ),
                               ),
-                              topButton(Icons.my_location_rounded, () {
-                                if (hasLiveLocation) {
-                                  mapController.move(currentLatLng, 17);
-                                }
-                              }),
+                              Expanded(
+                                child: StatBlock(
+                                  value: _totalRuns.toString(),
+                                  label: 'Runs',
+                                ),
+                              ),
+                              Expanded(
+                                child: _myTerritoryArea > 0
+                                    ? StatBlock(
+                                        value: area.value,
+                                        unit: area.unit,
+                                        label: 'Terra area',
+                                        accent: true,
+                                      )
+                                    : const StatBlock(
+                                        value: '—',
+                                        label: 'Terra area',
+                                        accent: true,
+                                      ),
+                              ),
                             ],
                           ),
-                        ),
                       ],
                     ),
                   ),

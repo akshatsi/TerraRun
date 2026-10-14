@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import '../services/run_service.dart';
+import '../theme/app_theme.dart';
+import '../utils/format.dart';
+import '../widgets/app_widgets.dart';
 
 class RunHistoryPage extends StatefulWidget {
   const RunHistoryPage({super.key});
@@ -12,10 +15,6 @@ class _RunHistoryPageState extends State<RunHistoryPage> {
   bool _isLoading = true;
   String? _error;
   List<dynamic> _runs = [];
-
-  static const bgTop = Color(0xFF1A1A1A);
-  static const bgBody = Color(0xFF050505);
-  static const accent = Color(0xFF3B82F6);
 
   @override
   void initState() {
@@ -46,19 +45,6 @@ class _RunHistoryPageState extends State<RunHistoryPage> {
     }
   }
 
-  String _formatDuration(int seconds) {
-    final hours = seconds ~/ 3600;
-    final minutes = (seconds % 3600) ~/ 60;
-    final secs = seconds % 60;
-
-    String two(int n) => n.toString().padLeft(2, '0');
-
-    if (hours > 0) {
-      return '${two(hours)}:${two(minutes)}:${two(secs)}';
-    }
-    return '${two(minutes)}:${two(secs)}';
-  }
-
   String _formatDate(String isoString) {
     try {
       final dt = DateTime.parse(isoString).toLocal();
@@ -68,83 +54,42 @@ class _RunHistoryPageState extends State<RunHistoryPage> {
     }
   }
 
-  Widget _topIconButton(IconData icon, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.06),
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: Colors.white.withOpacity(0.08),
-          ),
-        ),
-        child: Icon(icon, color: Colors.white, size: 18),
-      ),
-    );
-  }
-
-  Widget _stat(String label, String value) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 10,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _runCard(dynamic run) {
     final distance = (run['distance_km'] ?? 0).toDouble();
     final duration = (run['duration_seconds'] ?? 0) as int;
     final avgSpeed = (run['avg_speed'] ?? 0).toDouble();
     final createdAt = run['created_at']?.toString() ?? '';
 
-    return Container(
+    return AppCard(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
-      ),
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            _formatDate(createdAt),
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 11,
-            ),
-          ),
-          const SizedBox(height: 10),
+          Text(_formatDate(createdAt).toUpperCase(), style: AppText.overline),
+          const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
-                child: _stat('Distance', '${distance.toStringAsFixed(2)} km'),
+                child: StatBlock(
+                  value: distance.toStringAsFixed(2),
+                  unit: 'KM',
+                  label: 'Distance',
+                  accent: true,
+                ),
               ),
               Expanded(
-                child: _stat('Time', _formatDuration(duration)),
+                child: StatBlock(
+                  value: Fmt.duration(duration),
+                  label: 'Duration',
+                ),
               ),
               Expanded(
-                child: _stat('Avg speed', avgSpeed.toStringAsFixed(1)),
+                child: StatBlock(
+                  value: avgSpeed.toStringAsFixed(1),
+                  unit: 'KM/H',
+                  label: 'Avg speed',
+                ),
               ),
             ],
           ),
@@ -156,67 +101,35 @@ class _RunHistoryPageState extends State<RunHistoryPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bgBody,
+      backgroundColor: AppColors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            Container(
-              color: bgTop,
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              child: Row(
-                children: [
-                  _topIconButton(Icons.arrow_back_rounded, () {
-                    Navigator.pop(context);
-                  }),
-                  const Spacer(),
-                  const Text(
-                    'Run History',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const Spacer(),
-                  _topIconButton(Icons.refresh_rounded, _loadRuns),
-                ],
+            ScreenHeader(
+              title: 'Run history',
+              leading: IconCircleButton(
+                icon: Icons.arrow_back_rounded,
+                onTap: () => Navigator.pop(context),
+              ),
+              trailing: IconCircleButton(
+                icon: Icons.refresh_rounded,
+                onTap: _loadRuns,
               ),
             ),
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: _isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator(color: accent),
-                      )
-                    : _error != null
-                        ? Center(
-                            child: Text(
-                              _error!,
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 13,
-                              ),
-                              textAlign: TextAlign.center,
+              child: _isLoading
+                  ? const Center(child: AppLoader(size: 28))
+                  : _error != null
+                      ? MessageView(_error!)
+                      : _runs.isEmpty
+                          ? const MessageView('No runs saved yet')
+                          : ListView.builder(
+                              padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+                              itemCount: _runs.length,
+                              itemBuilder: (context, index) {
+                                return _runCard(_runs[index]);
+                              },
                             ),
-                          )
-                        : _runs.isEmpty
-                            ? const Center(
-                                child: Text(
-                                  'No runs saved yet',
-                                  style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              )
-                            : ListView.builder(
-                                itemCount: _runs.length,
-                                itemBuilder: (context, index) {
-                                  return _runCard(_runs[index]);
-                                },
-                              ),
-              ),
             ),
           ],
         ),

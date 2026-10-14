@@ -11,6 +11,20 @@
 - Home and profile stats
 - Map-based tracking using Flutter Map
 
+## Design system
+
+The UI follows the INTVL look: a near-black canvas, a coral-to-magenta brand
+gradient, purple for claimed territory, and Plus Jakarta Sans for type.
+
+- `lib/theme/app_theme.dart` has the colour tokens (`AppColors`), the type
+  scale (`AppText`) and the dark `ThemeData`.
+- `lib/widgets/app_widgets.dart` has the shared pieces: `GradientButton`,
+  `SegmentedPill`, `StatBlock`, `AppCard`, `HeroCard`, `Headline` and others.
+- `lib/utils/format.dart` formats areas, durations and date keys.
+
+Fonts load through the `google_fonts` package, so the first launch needs a
+network connection.
+
 ## Tech Stack
 
 ### Frontend

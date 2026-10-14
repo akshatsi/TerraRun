@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'main_navigation.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_widgets.dart';
 import 'login_form_page.dart';
 import 'signup_page.dart';
 
@@ -16,30 +17,44 @@ class _LoginPageState extends State<LoginPage> {
   Timer? _timer;
   int currentIndex = 0;
 
-  final List<OnboardingData> pages = const [
+  static const List<OnboardingData> pages = [
     OnboardingData(
-      title: 'Own your streets.',
+      headline: [
+        HeadlineSpan('Own your '),
+        HeadlineSpan('streets', emphasis: true, italic: true),
+        HeadlineSpan('.'),
+      ],
+      subtitle: 'Run a loop and the ground inside it becomes yours.',
       backgroundImage: 'assets/onboarding/bg1.jpg',
-      floatingImage: 'assets/onboarding/float1.jpg',
     ),
     OnboardingData(
-      title: 'Close loops that never run out.',
+      headline: [
+        HeadlineSpan('Close '),
+        HeadlineSpan('loops', emphasis: true, italic: true),
+        HeadlineSpan(' that never run out.'),
+      ],
+      subtitle: 'Every route you close adds to your territory.',
       backgroundImage: 'assets/onboarding/bg2.jpg',
-      floatingImage: 'assets/onboarding/float2.jpg',
     ),
     OnboardingData(
-      title: 'Get motivation from your people.',
+      headline: [
+        HeadlineSpan('Get motivation from '),
+        HeadlineSpan('your people', emphasis: true, italic: true),
+        HeadlineSpan('.'),
+      ],
+      subtitle: 'Climb the leaderboard and watch rivals chase your streets.',
       backgroundImage: 'assets/onboarding/bg3.jpg',
-      floatingImage: 'assets/onboarding/float3.jpg',
     ),
     OnboardingData(
-      title: 'Run your world.',
+      headline: [
+        HeadlineSpan('Run your '),
+        HeadlineSpan('world', emphasis: true, italic: true),
+        HeadlineSpan('.'),
+      ],
+      subtitle: 'Your crew against the world.',
       backgroundImage: 'assets/onboarding/bg4.jpg',
-      floatingImage: 'assets/onboarding/float4.jpg',
     ),
   ];
-
-  static const accentColor = Color(0xFF3B82F6);
 
   @override
   void initState() {
@@ -49,7 +64,7 @@ class _LoginPageState extends State<LoginPage> {
 
   void _startAutoScroll() {
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(milliseconds: 3500), (_) {
+    _timer = Timer.periodic(const Duration(milliseconds: 4500), (_) {
       if (!_pageController.hasClients) return;
 
       final nextIndex = (currentIndex + 1) % pages.length;
@@ -61,13 +76,6 @@ class _LoginPageState extends State<LoginPage> {
     });
   }
 
-  void _goToApp() {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => const MainNavigation()),
-    );
-  }
-
   @override
   void dispose() {
     _timer?.cancel();
@@ -75,233 +83,99 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  Widget buildBrandLogo() {
-    return Transform(
-      transform: Matrix4.skewX(-0.18),
-      alignment: Alignment.center,
-      child: const Text(
-        'TERRARUN',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 40,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 0.5,
-          height: 1,
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
-    final screenHeight = media.size.height - media.padding.top;
-    final topSectionHeight = screenHeight * 0.58;
-
-    final cardTop = topSectionHeight * 0.40;
+    final imageHeight = media.size.height * 0.74;
+    final controlsHeight = 176 + media.padding.bottom;
 
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: ClipRect(
-        child: Stack(
-          children: [
-            PageView.builder(
-              controller: _pageController,
-              itemCount: pages.length,
-              onPageChanged: (index) {
-                setState(() {
-                  currentIndex = index;
-                });
-              },
-              itemBuilder: (context, index) {
-                final item = pages[index];
-
-                return Stack(
-                  children: [
-                    Column(
-                      children: [
-                        SizedBox(
-                          height: topSectionHeight,
-                          width: double.infinity,
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Image.asset(
-                                item.backgroundImage,
-                                fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Container(
-                                    color: const Color(0xFF0F0E47),
-                                    alignment: Alignment.center,
-                                    child: Text(
-                                      item.backgroundImage,
-                                      style: const TextStyle(color: Colors.white),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  );
-                                },
-                              ),
-                              Container(
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      Colors.black.withOpacity(0.12),
-                                      Colors.black.withOpacity(0.12),
-                                      Colors.black.withOpacity(0.32),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                top: 0,
-                                left: 0,
-                                right: 0,
-                                child: SafeArea(
-                                  bottom: false,
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(top: 18),
-                                    child: Center(
-                                      child: buildBrandLogo(),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: Container(
-                            width: double.infinity,
-                            color: Colors.black,
-                            padding: const EdgeInsets.fromLTRB(28, 110, 28, 18),
-                            child: Column(
-                              children: [
-                                AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 450),
-                                  switchInCurve: Curves.easeOutCubic,
-                                  switchOutCurve: Curves.easeInCubic,
-                                  child: Text(
-                                    item.title,
-                                    key: ValueKey(item.title),
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 22,
-                                      height: 1.18,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: List.generate(
-                                    pages.length,
-                                    (dotIndex) => AnimatedContainer(
-                                      duration: const Duration(milliseconds: 260),
-                                      margin: const EdgeInsets.symmetric(horizontal: 5),
-                                      width: 8,
-                                      height: 8,
-                                      decoration: BoxDecoration(
-                                        color: currentIndex == dotIndex
-                                            ? accentColor
-                                            : Colors.white,
-                                        borderRadius: BorderRadius.circular(20),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    Positioned(
-                      top: cardTop,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 700),
-                          switchInCurve: Curves.easeOutCubic,
-                          switchOutCurve: Curves.easeInCubic,
-                          transitionBuilder: (child, animation) {
-                            return FadeTransition(
-                              opacity: animation,
-                              child: ScaleTransition(
-                                scale: Tween<double>(
-                                  begin: 0.97,
-                                  end: 1.0,
-                                ).animate(animation),
-                                child: child,
-                              ),
-                            );
-                          },
-                          child: _FloatingPreviewCard(
-                            key: ValueKey(item.floatingImage),
-                            imagePath: item.floatingImage,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
+      backgroundColor: AppColors.bg,
+      body: Stack(
+        children: [
+          PageView.builder(
+            controller: _pageController,
+            itemCount: pages.length,
+            onPageChanged: (index) {
+              setState(() {
+                currentIndex = index;
+              });
+            },
+            itemBuilder: (context, index) {
+              return _Slide(
+                data: pages[index],
+                imageHeight: imageHeight,
+                bottomInset: controlsHeight,
+              );
+            },
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              bottom: false,
+              child: const Padding(
+                padding: EdgeInsets.only(top: 20),
+                child: Center(child: Wordmark(size: 15)),
+              ),
             ),
-            Positioned(
-              left: 28,
-              right: 28,
-              bottom: 18,
-              child: SafeArea(
-                top: false,
+          ),
+          Positioned(
+            left: 24,
+            right: 24,
+            bottom: 0,
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 18),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    SizedBox(
-                      width: media.size.width * 0.88,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: accentColor,
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size.fromHeight(60),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(32),
-                          ),
-                          textStyle: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: List.generate(
+                        pages.length,
+                        (dotIndex) => AnimatedContainer(
+                          duration: const Duration(milliseconds: 260),
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          width: currentIndex == dotIndex ? 22 : 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: currentIndex == dotIndex
+                                ? AppColors.pink
+                                : Colors.white.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(20),
                           ),
                         ),
-                        onPressed: () {
-  Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const SignupPage(),
-    ),
-  );
-},
-                        child: const Text('Join for free'),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    GestureDetector(
-                      onTap: () {
-  Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const LoginFormPage(),
-    ),
-  );
-},
-                      child: const Text(
+                    const SizedBox(height: 22),
+                    GradientButton(
+                      label: 'Join for free',
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const SignupPage(),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const LoginFormPage(),
+                          ),
+                        );
+                      },
+                      child: Text(
                         'Log in',
-                        style: TextStyle(
-                          color: accentColor,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
+                        style: AppText.button.copyWith(
+                          color: AppColors.textSecondary,
                         ),
                       ),
                     ),
@@ -309,74 +183,92 @@ class _LoginPageState extends State<LoginPage> {
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class OnboardingData {
-  final String title;
+  final List<HeadlineSpan> headline;
+  final String subtitle;
   final String backgroundImage;
-  final String floatingImage;
 
   const OnboardingData({
-    required this.title,
+    required this.headline,
+    required this.subtitle,
     required this.backgroundImage,
-    required this.floatingImage,
   });
 }
 
-class _FloatingPreviewCard extends StatelessWidget {
-  final String imagePath;
+class _Slide extends StatelessWidget {
+  final OnboardingData data;
+  final double imageHeight;
+  final double bottomInset;
 
-  const _FloatingPreviewCard({
-    super.key,
-    required this.imagePath,
+  const _Slide({
+    required this.data,
+    required this.imageHeight,
+    required this.bottomInset,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 180,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black38,
-            blurRadius: 30,
-            offset: Offset(0, 18),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(2),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: AspectRatio(
-            aspectRatio: 0.56,
-            child: Image.asset(
-              imagePath,
-              fit: BoxFit.cover,
-alignment: Alignment.centerLeft,
-
-              errorBuilder: (context, error, stackTrace) {
-                return Container(
-                  color: Colors.white,
-                  alignment: Alignment.center,
-                  child: Text(
-                    imagePath,
-                    style: const TextStyle(color: Colors.black54),
-                    textAlign: TextAlign.center,
+    return Stack(
+      children: [
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          height: imageHeight,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.asset(
+                data.backgroundImage,
+                fit: BoxFit.cover,
+                alignment: Alignment.topCenter,
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(color: AppColors.surface);
+                },
+              ),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    stops: const [0.0, 0.45, 0.8, 1.0],
+                    colors: [
+                      AppColors.bg.withValues(alpha: 0.55),
+                      AppColors.deepPurple.withValues(alpha: 0.28),
+                      AppColors.bg.withValues(alpha: 0.9),
+                      AppColors.bg,
+                    ],
                   ),
-                );
-              },
-            ),
+                ),
+              ),
+            ],
           ),
         ),
-      ),
+        Positioned(
+          left: 24,
+          right: 24,
+          bottom: bottomInset,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Headline(data.headline, style: AppText.display),
+              const SizedBox(height: 12),
+              Text(
+                data.subtitle,
+                style: AppText.bodySecondary.copyWith(fontSize: 15),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
