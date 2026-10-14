@@ -32,6 +32,9 @@ class _RunPageState extends State<RunPage> {
   bool _mapReady = false;
   bool _centred = RunDataStore.currentLatitude != null;
 
+  // The map follows the user until they drag it; the target button resumes.
+  bool _following = true;
+
   Timer? timer;
   StreamSubscription<Position>? positionStream;
   Position? lastPosition;
@@ -39,9 +42,9 @@ class _RunPageState extends State<RunPage> {
   final List<RunPoint> runPath = [];
 
   LatLng get currentLatLng => LatLng(
-        RunDataStore.currentLatitude ?? 28.6139,
-        RunDataStore.currentLongitude ?? 77.2090,
-      );
+    RunDataStore.currentLatitude ?? 28.6139,
+    RunDataStore.currentLongitude ?? 77.2090,
+  );
 
   List<LatLng> get latestPathPoints {
     return runPath.map((p) => LatLng(p.latitude, p.longitude)).toList();
@@ -52,28 +55,59 @@ class _RunPageState extends State<RunPage> {
     super.initState();
     LocationService.latest.addListener(_onLocationChanged);
     LocationService.status.addListener(_onLocationChanged);
+    LocationService.error.addListener(_onLocationChanged);
   }
 
   void _onLocationChanged() {
     if (!mounted) return;
-    _centreOnFirstFix();
-    // While running, the position stream already rebuilds the page.
-    if (!isRunning) setState(() {});
+    _followLatest();
+    setState(() {});
   }
 
-  /// Moves the map to the user once, when the first fix arrives.
-  void _centreOnFirstFix() {
+  /// Keeps the map on the user's latest position while following.
+  void _followLatest() {
     final position = LocationService.latest.value;
-    if (position == null || !_mapReady || _centred || isRunning) return;
+    if (position == null || !_mapReady || !_following) return;
 
+    // Zoom in on the first fix, then keep whatever zoom the user chose.
+    final zoom = _centred ? mapController.camera.zoom : 17.0;
     _centred = true;
-    mapController.move(LatLng(position.latitude, position.longitude), 17);
+    mapController.move(LatLng(position.latitude, position.longitude), zoom);
   }
+
+  bool get _hasFix => RunDataStore.currentLatitude != null;
+
+  /// A position is known and nothing is wrong with location.
+  bool get _gpsOk => _hasFix && LocationService.hint == null;
 
   String get _bannerText {
-    if (isRunning) return 'GPS acquired';
+    if (isRunning) {
+      return _gpsOk
+          ? 'GPS acquired'
+          : (LocationService.hint ?? 'Waiting for GPS…');
+    }
     if (statusText != _readyText) return statusText;
     return LocationService.hint ?? _readyText;
+  }
+
+  String? get _bannerDetail {
+    if (isRunning && _gpsOk) return null;
+    if (!isRunning && statusText != _readyText) return null;
+    return LocationService.hintDetail;
+  }
+
+  void _onRunLocationError(Object error) {
+    LocationService.report(error);
+  }
+
+  void _findMe() {
+    setState(() => _following = true);
+
+    if (_hasFix) {
+      mapController.move(currentLatLng, 17);
+    } else {
+      LocationService.requestFix();
+    }
   }
 
   bool _isLoopClosed(List<RunPoint> path) {
@@ -147,47 +181,50 @@ class _RunPageState extends State<RunPage> {
 
     positionStream = Geolocator.getPositionStream(
       locationSettings: LocationService.runSettings(),
-    ).listen((Position position) {
-      if (!mounted) return;
+    ).listen(_onRunPosition, onError: _onRunLocationError);
 
-      final point = RunPoint(
-        latitude: position.latitude,
-        longitude: position.longitude,
+    // Start from the position the app already has. A device that is not
+    // moving may not report again, and the run should not wait on it.
+    final start = LocationService.latest.value;
+    if (start != null) _onRunPosition(start, publish: false);
+  }
+
+  void _onRunPosition(Position position, {bool publish = true}) {
+    if (!mounted) return;
+
+    final point = RunPoint(
+      latitude: position.latitude,
+      longitude: position.longitude,
+    );
+
+    double addedKm = 0.0;
+
+    if (lastPosition != null) {
+      final meters = Geolocator.distanceBetween(
+        lastPosition!.latitude,
+        lastPosition!.longitude,
+        position.latitude,
+        position.longitude,
       );
 
-      double addedKm = 0.0;
-
-      if (lastPosition != null) {
-        final meters = Geolocator.distanceBetween(
-          lastPosition!.latitude,
-          lastPosition!.longitude,
-          position.latitude,
-          position.longitude,
-        );
-
-        // Ignore clearly bad GPS jumps and tiny noise
-        if (meters >= 2 && meters <= 50) {
-          addedKm = meters / 1000;
-        }
+      // Ignore clearly bad GPS jumps and tiny noise
+      if (meters >= 2 && meters <= 50) {
+        addedKm = meters / 1000;
       }
+    }
 
-      lastPosition = position;
+    lastPosition = position;
 
-      setState(() {
-        runPath.add(point);
-        RunDataStore.latestRunPath = List.from(runPath);
+    setState(() {
+      runPath.add(point);
+      RunDataStore.latestRunPath = List.from(runPath);
 
-        distanceKm += addedKm;
-        _recalculateAvgSpeed();
-      });
-
-      LocationService.publish(position);
-
-      mapController.move(
-        LatLng(position.latitude, position.longitude),
-        17,
-      );
+      distanceKm += addedKm;
+      _recalculateAvgSpeed();
     });
+
+    // Publishing also moves the map when it is following.
+    if (publish) LocationService.publish(position);
   }
 
   Future<void> stopRun() async {
@@ -233,7 +270,8 @@ class _RunPageState extends State<RunPage> {
 
     if (!mounted) return;
 
-    final hasTerritoryData = result['success'] == true &&
+    final hasTerritoryData =
+        result['success'] == true &&
         result['data'] is Map &&
         result['data']['territory_geojson'] != null;
 
@@ -241,22 +279,22 @@ class _RunPageState extends State<RunPage> {
       isSavingRun = false;
       statusText = result['success'] == true
           ? (hasTerritoryData
-              ? 'Territory claimed! Run saved'
-              : closedLoop
-                  ? 'Loop captured and run saved'
-                  : 'Run saved')
+                ? 'Territory claimed! Run saved'
+                : closedLoop
+                ? 'Loop captured and run saved'
+                : 'Run saved')
           : 'Run stopped, but save failed';
     });
 
     final message = result['success'] == true
         ? (hasTerritoryData
-            ? 'Run saved — territory captured!'
-            : 'Run saved successfully')
+              ? 'Run saved — territory captured!'
+              : 'Run saved successfully')
         : (result['message']?.toString() ?? 'Failed to save run');
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> resetRun() async {
@@ -280,15 +318,21 @@ class _RunPageState extends State<RunPage> {
   String formatTime(int totalSeconds) => Fmt.duration(totalSeconds);
 
   Widget buildTopBanner() {
+    final tracking = isRunning && _gpsOk;
+    final problem = !tracking && LocationService.hint != null;
+    final detail = _bannerDetail;
+
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
       decoration: BoxDecoration(
         color: AppColors.surface.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(detail == null ? 999 : 26),
         border: Border.all(
-          color: isRunning
+          color: tracking
               ? AppColors.pink.withValues(alpha: 0.6)
+              : problem
+              ? AppColors.gold.withValues(alpha: 0.5)
               : AppColors.border,
         ),
       ),
@@ -298,34 +342,50 @@ class _RunPageState extends State<RunPage> {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: isRunning
+              color: tracking
                   ? AppColors.pink.withValues(alpha: 0.18)
                   : Colors.white.withValues(alpha: 0.08),
               shape: BoxShape.circle,
             ),
             child: Icon(
-              isRunning ? Icons.gps_fixed : Icons.location_searching,
-              color: isRunning ? AppColors.pink : AppColors.textSecondary,
+              tracking
+                  ? Icons.gps_fixed
+                  : problem
+                  ? Icons.location_off_rounded
+                  : Icons.location_searching,
+              color: tracking
+                  ? AppColors.pink
+                  : problem
+                  ? AppColors.gold
+                  : AppColors.textSecondary,
               size: 18,
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              _bannerText,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppText.subtitle.copyWith(
-                color: isRunning ? AppColors.pink : Colors.white,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _bannerText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.subtitle.copyWith(
+                    color: tracking ? AppColors.pink : Colors.white,
+                  ),
+                ),
+                if (detail != null) ...[
+                  const SizedBox(height: 2),
+                  Text(detail, style: AppText.caption.copyWith(height: 1.3)),
+                ],
+              ],
             ),
           ),
           IconCircleButton(
             icon: Icons.my_location_rounded,
             size: 36,
-            onTap: () {
-              mapController.move(currentLatLng, 17);
-            },
+            active: _following && _hasFix,
+            onTap: _findMe,
           ),
         ],
       ),
@@ -416,6 +476,7 @@ class _RunPageState extends State<RunPage> {
   void dispose() {
     LocationService.latest.removeListener(_onLocationChanged);
     LocationService.status.removeListener(_onLocationChanged);
+    LocationService.error.removeListener(_onLocationChanged);
     timer?.cancel();
     positionStream?.cancel();
     super.dispose();
@@ -423,7 +484,8 @@ class _RunPageState extends State<RunPage> {
 
   @override
   Widget build(BuildContext context) {
-    final hasLocation = RunDataStore.currentLatitude != null &&
+    final hasLocation =
+        RunDataStore.currentLatitude != null &&
         RunDataStore.currentLongitude != null;
 
     return Scaffold(
@@ -433,11 +495,17 @@ class _RunPageState extends State<RunPage> {
           FlutterMap(
             mapController: mapController,
             options: MapOptions(
+              backgroundColor: AppColors.bg,
               initialCenter: currentLatLng,
               initialZoom: hasLocation ? 17 : 15,
               onMapReady: () {
                 _mapReady = true;
-                _centreOnFirstFix();
+                _followLatest();
+              },
+              onPositionChanged: (camera, hasGesture) {
+                if (hasGesture && _following) {
+                  setState(() => _following = false);
+                }
               },
             ),
             children: [
@@ -454,35 +522,32 @@ class _RunPageState extends State<RunPage> {
                 ),
               MarkerLayer(
                 markers: [
-                  Marker(
-                    point: currentLatLng,
-                    width: 28,
-                    height: 28,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: AppColors.pink,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 3),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.pink.withValues(alpha: 0.55),
-                            blurRadius: 14,
-                          ),
-                        ],
+                  if (_hasFix)
+                    Marker(
+                      point: currentLatLng,
+                      width: 28,
+                      height: 28,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.pink,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.pink.withValues(alpha: 0.55),
+                              blurRadius: 14,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ],
           ),
           SafeArea(
             child: Column(
-              children: [
-                buildTopBanner(),
-                const Spacer(),
-                buildBottomPanel(),
-              ],
+              children: [buildTopBanner(), const Spacer(), buildBottomPanel()],
             ),
           ),
         ],

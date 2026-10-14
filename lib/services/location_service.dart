@@ -16,9 +16,13 @@ class LocationService {
   static StreamSubscription<Position>? _subscription;
   static bool _starting = false;
 
-  static final ValueNotifier<LocationStatus> status =
-      ValueNotifier(LocationStatus.unknown);
+  static final ValueNotifier<LocationStatus> status = ValueNotifier(
+    LocationStatus.unknown,
+  );
   static final ValueNotifier<Position?> latest = ValueNotifier(null);
+
+  /// The last error from the device or browser, cleared by the next fix.
+  static final ValueNotifier<Object?> error = ValueNotifier(null);
 
   /// Checks that location is on and allowed, asking the user if needed.
   static Future<LocationStatus> ensurePermission() async {
@@ -54,23 +58,59 @@ class LocationService {
       final result = await ensurePermission();
       if (result != LocationStatus.ready) return;
 
-      _subscription = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 5,
-        ),
-      ).listen(
-        publish,
-        onError: (Object error) => debugPrint('Location stream error: $error'),
-      );
-
+      _ensureStream();
       // The stream only reports movement, so ask once for the first fix.
-      publish(await Geolocator.getCurrentPosition());
+      await _fetchPosition();
     } catch (e) {
-      debugPrint('Location start error: $e');
+      report(e);
     } finally {
       _starting = false;
     }
+  }
+
+  /// Tries again for a position, for the "find me" button, and makes sure
+  /// live tracking is running. Returns whether a position was found.
+  static Future<bool> requestFix() async {
+    final access = await ensurePermission();
+    if (access != LocationStatus.ready) return false;
+
+    _ensureStream();
+    return _fetchPosition();
+  }
+
+  /// Called when the app comes back to the front: if tracking never started
+  /// because location was off or blocked, try again now that it may be fixed.
+  static Future<void> resume() async {
+    if (_subscription != null) return;
+    // A dismissed permission prompt is not asked again on every return.
+    if (status.value == LocationStatus.denied) return;
+    await startPassive();
+  }
+
+  static void _ensureStream() {
+    if (_subscription != null) return;
+
+    _subscription = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+      ),
+    ).listen(publish, onError: report);
+  }
+
+  static Future<bool> _fetchPosition() async {
+    try {
+      publish(await Geolocator.getCurrentPosition());
+      return true;
+    } catch (e) {
+      report(e);
+      return false;
+    }
+  }
+
+  static void report(Object problem) {
+    debugPrint('Location error: $problem');
+    error.value = problem;
   }
 
   static Future<void> stopPassive() async {
@@ -82,10 +122,19 @@ class LocationService {
   static void publish(Position position) {
     RunDataStore.currentLatitude = position.latitude;
     RunDataStore.currentLongitude = position.longitude;
+    if (kDebugMode) {
+      debugPrint(
+        'Location fix: ${position.latitude.toStringAsFixed(4)}, '
+        '${position.longitude.toStringAsFixed(4)} '
+        '(+/-${position.accuracy.round()} m)',
+      );
+    }
+    error.value = null;
     latest.value = position;
   }
 
-  /// Short note for the run screen while it waits on location, or null.
+  /// Short note for the run and map screens while location is not working,
+  /// or null once a position is known.
   static String? get hint {
     switch (status.value) {
       case LocationStatus.serviceOff:
@@ -93,10 +142,33 @@ class LocationService {
       case LocationStatus.denied:
         return 'Allow location to start';
       case LocationStatus.deniedForever:
-        return 'Allow location from settings';
+        return kIsWeb ? 'Location is blocked' : 'Allow location from settings';
       case LocationStatus.ready:
-        return latest.value == null ? 'Finding your location…' : null;
+        if (latest.value != null) return null;
+        return error.value == null
+            ? 'Finding your location…'
+            : "Can't find your location";
       case LocationStatus.unknown:
+        return null;
+    }
+  }
+
+  /// A line on what to try, shown under [hint].
+  static String? get hintDetail {
+    switch (status.value) {
+      case LocationStatus.deniedForever:
+        return kIsWeb
+            ? 'Allow location for this site (lock icon in the address bar) '
+                  'and turn on Location Services for your browser.'
+            : null;
+      case LocationStatus.ready:
+        if (latest.value != null || error.value == null) return null;
+        return kIsWeb
+            ? 'Turn on Location Services for your browser in System '
+                  'Settings, then tap the target icon.'
+            : 'Check that location is on and you have a clear view of the '
+                  'sky, then tap the target icon.';
+      default:
         return null;
     }
   }

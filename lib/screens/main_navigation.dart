@@ -14,7 +14,8 @@ class MainNavigation extends StatefulWidget {
   State<MainNavigation> createState() => _MainNavigationState();
 }
 
-class _MainNavigationState extends State<MainNavigation> {
+class _MainNavigationState extends State<MainNavigation>
+    with WidgetsBindingObserver {
   int selectedIndex = 0;
 
   // Index 2 is the Run tab. It is built once and then kept alive, so a run
@@ -33,13 +34,20 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     LocationService.startPassive();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     LocationService.stopPassive();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) LocationService.resume();
   }
 
   void onItemTapped(int index) {
@@ -148,8 +156,9 @@ class _MainNavigationState extends State<MainNavigation> {
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: AppColors.magenta
-                          .withValues(alpha: isSelected ? 0.5 : 0.28),
+                      color: AppColors.magenta.withValues(
+                        alpha: isSelected ? 0.5 : 0.28,
+                      ),
                       blurRadius: isSelected ? 20 : 12,
                       offset: const Offset(0, 5),
                     ),

@@ -43,12 +43,16 @@ class IconCircleButton extends StatelessWidget {
   /// Near-opaque fill, for buttons that sit on top of a map.
   final bool solid;
 
+  /// Tints the icon in the brand colour, to show a mode is on.
+  final bool active;
+
   const IconCircleButton({
     super.key,
     required this.icon,
     this.onTap,
     this.size = 40,
     this.solid = false,
+    this.active = false,
   });
 
   @override
@@ -66,7 +70,11 @@ class IconCircleButton extends StatelessWidget {
           shape: BoxShape.circle,
           border: Border.all(color: AppColors.border),
         ),
-        child: Icon(icon, size: size * 0.45, color: Colors.white),
+        child: Icon(
+          icon,
+          size: size * 0.45,
+          color: active ? AppColors.pink : Colors.white,
+        ),
       ),
     );
   }
@@ -246,8 +254,8 @@ class StatBlock extends StatelessWidget {
     final textAlign = align == CrossAxisAlignment.center
         ? TextAlign.center
         : align == CrossAxisAlignment.end
-            ? TextAlign.right
-            : TextAlign.left;
+        ? TextAlign.right
+        : TextAlign.left;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -433,7 +441,9 @@ class GradientProgressBar extends StatelessWidget {
             widthFactor: value.clamp(0.0, 1.0),
             child: Container(
               height: height,
-              decoration: const BoxDecoration(gradient: AppColors.brandGradient),
+              decoration: const BoxDecoration(
+                gradient: AppColors.brandGradient,
+              ),
             ),
           ),
         ],
@@ -492,11 +502,7 @@ class _TerritoryPainter extends CustomPainter {
       ..strokeWidth = 1;
 
     for (double x = -size.height; x < size.width; x += 28) {
-      canvas.drawLine(
-        Offset(x, size.height),
-        Offset(x + size.height, 0),
-        grid,
-      );
+      canvas.drawLine(Offset(x, size.height), Offset(x + size.height, 0), grid);
     }
     for (double x = 0; x < size.width + size.height; x += 36) {
       canvas.drawLine(Offset(x, 0), Offset(x - size.height, size.height), grid);

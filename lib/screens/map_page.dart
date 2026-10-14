@@ -31,6 +31,9 @@ class _MapPageState extends State<MapPage> {
   bool _mapReady = false;
   bool _centred = RunDataStore.currentLatitude != null;
 
+  // The map follows the user until they drag it; the target button resumes.
+  bool _following = true;
+
   // 0 = all players, 1 = only my territory
   int _filterIndex = 0;
 
@@ -43,9 +46,9 @@ class _MapPageState extends State<MapPage> {
       RunDataStore.currentLongitude != null;
 
   LatLng get currentLatLng => LatLng(
-        RunDataStore.currentLatitude ?? 28.6139,
-        RunDataStore.currentLongitude ?? 77.2090,
-      );
+    RunDataStore.currentLatitude ?? 28.6139,
+    RunDataStore.currentLongitude ?? 77.2090,
+  );
 
   List<LatLng> get latestPathPoints {
     return RunDataStore.latestRunPath
@@ -53,28 +56,26 @@ class _MapPageState extends State<MapPage> {
         .toList();
   }
 
-  /// Moves the map to the user once, when the first fix arrives.
-  void _centreOnFirstFix() {
+  /// Keeps the map on the user's latest position while following.
+  void _followLatest() {
     final position = LocationService.latest.value;
-    if (position == null || !_mapReady || _centred) return;
+    if (position == null || !_mapReady || !_following) return;
 
+    // Zoom in on the first fix, then keep whatever zoom the user chose.
+    final zoom = _centred ? mapController.camera.zoom : 16.0;
     _centred = true;
-    mapController.move(LatLng(position.latitude, position.longitude), 16);
+    mapController.move(LatLng(position.latitude, position.longitude), zoom);
   }
 
   @override
   void initState() {
     super.initState();
-    LocationService.latest.addListener(_centreOnFirstFix);
+    LocationService.latest.addListener(_followLatest);
     _loadRuns();
     _loadTerritories();
 
     followTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
-
-      if (RunDataStore.isRunActive && hasLiveLocation) {
-        mapController.move(currentLatLng, 17);
-      }
 
       setState(() {});
     });
@@ -151,10 +152,10 @@ class _MapPageState extends State<MapPage> {
         final ring = coords[0] as List<dynamic>;
         polygons.add(
           ring
-              .map((c) => LatLng(
-                    (c[1] as num).toDouble(),
-                    (c[0] as num).toDouble(),
-                  ))
+              .map(
+                (c) =>
+                    LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()),
+              )
               .toList(),
         );
       }
@@ -164,10 +165,10 @@ class _MapPageState extends State<MapPage> {
         final ring = (poly as List<dynamic>)[0] as List<dynamic>;
         polygons.add(
           ring
-              .map((c) => LatLng(
-                    (c[1] as num).toDouble(),
-                    (c[0] as num).toDouble(),
-                  ))
+              .map(
+                (c) =>
+                    LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()),
+              )
               .toList(),
         );
       }
@@ -193,7 +194,7 @@ class _MapPageState extends State<MapPage> {
 
   @override
   void dispose() {
-    LocationService.latest.removeListener(_centreOnFirstFix);
+    LocationService.latest.removeListener(_followLatest);
     followTimer?.cancel();
     super.dispose();
   }
@@ -241,18 +242,18 @@ class _MapPageState extends State<MapPage> {
     final statusText = _statsError != null
         ? _statsError!
         : RunDataStore.isRunActive
-            ? 'Live run tracking active'
-            : _totalRuns == 0
-                ? 'No runs saved yet'
-                : _myTerritoryArea > 0
-                    ? 'Your territory'
-                    : 'Runs completed';
+        ? 'Live run tracking active'
+        : _totalRuns == 0
+        ? 'No runs saved yet'
+        : _myTerritoryArea > 0
+        ? 'Your territory'
+        : 'Runs completed';
 
     final subText = _totalRuns == 0
         ? 'Start your first run to claim territory'
         : _myTerritoryArea > 0
-            ? '${_territories.length} players on the map'
-            : 'Total distance covered: ${_totalDistance.toStringAsFixed(2)} km';
+        ? '${_territories.length} players on the map'
+        : 'Total distance covered: ${_totalDistance.toStringAsFixed(2)} km';
 
     final area = Fmt.area(_myTerritoryArea);
 
@@ -263,11 +264,17 @@ class _MapPageState extends State<MapPage> {
           FlutterMap(
             mapController: mapController,
             options: MapOptions(
+              backgroundColor: AppColors.bg,
               initialCenter: currentLatLng,
               initialZoom: hasLiveLocation ? 16 : 14,
               onMapReady: () {
                 _mapReady = true;
-                _centreOnFirstFix();
+                _followLatest();
+              },
+              onPositionChanged: (camera, hasGesture) {
+                if (hasGesture && _following) {
+                  setState(() => _following = false);
+                }
               },
             ),
             children: [
@@ -287,24 +294,25 @@ class _MapPageState extends State<MapPage> {
                 ),
               MarkerLayer(
                 markers: [
-                  Marker(
-                    point: currentLatLng,
-                    width: 28,
-                    height: 28,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: AppColors.pink,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 3),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.pink.withValues(alpha: 0.55),
-                            blurRadius: 14,
-                          ),
-                        ],
+                  if (hasLiveLocation)
+                    Marker(
+                      point: currentLatLng,
+                      width: 28,
+                      height: 28,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.pink,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.pink.withValues(alpha: 0.55),
+                              blurRadius: 14,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ],
@@ -320,6 +328,43 @@ class _MapPageState extends State<MapPage> {
                     onChanged: (i) => setState(() => _filterIndex = i),
                   ),
                 ),
+                if (!hasLiveLocation && LocationService.hint != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface.withValues(alpha: 0.94),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: AppColors.gold.withValues(alpha: 0.5),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.location_off_rounded,
+                            color: AppColors.gold,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              LocationService.hint!,
+                              style: AppText.caption.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
@@ -337,9 +382,14 @@ class _MapPageState extends State<MapPage> {
                           IconCircleButton(
                             icon: Icons.my_location_rounded,
                             solid: true,
+                            active: _following && hasLiveLocation,
                             onTap: () {
+                              setState(() => _following = true);
+
                               if (hasLiveLocation) {
                                 mapController.move(currentLatLng, 17);
+                              } else {
+                                LocationService.requestFix();
                               }
                             },
                           ),
@@ -352,8 +402,9 @@ class _MapPageState extends State<MapPage> {
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
                   decoration: BoxDecoration(
                     color: AppColors.surface,
-                    borderRadius:
-                        const BorderRadius.vertical(top: Radius.circular(28)),
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(28),
+                    ),
                     border: Border.all(color: AppColors.border),
                   ),
                   child: SafeArea(
