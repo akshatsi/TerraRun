@@ -196,6 +196,30 @@ Without `android/key.properties` the release build is signed with the debug
 keys. It installs, but the Play Store rejects it. Use an `https://` address;
 Android blocks plain `http://` from release builds by default.
 
+#### Test build for a phone on the same Wi-Fi
+
+To try the app with the backend running on your own computer (no domain, no
+HTTPS), start the backend, find the computer's address, and build with the
+switch that allows plain `http://`:
+
+```bash
+ipconfig getifaddr en0
+```
+
+```bash
+ORG_GRADLE_PROJECT_allowCleartext=true flutter build apk --release --dart-define=API_URL=http://YOUR_IP:8000
+```
+
+Then install it on a phone with USB debugging on:
+
+```bash
+adb install -r build/app/outputs/flutter-apk/app-release.apk
+```
+
+The phone must be on the same Wi-Fi, and the address is fixed into the app:
+if your router gives the computer a new one, build again (or reserve the
+address in the router). Do not publish a build made with this switch.
+
 ### iOS
 
 ```bash

@@ -47,6 +47,10 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Plain http:// is blocked unless asked for. A build for a backend on
+        // the local network sets it: ORG_GRADLE_PROJECT_allowCleartext=true
+        manifestPlaceholders["usesCleartextTraffic"] =
+            (project.findProperty("allowCleartext") ?: "false").toString()
     }
 
     signingConfigs {
