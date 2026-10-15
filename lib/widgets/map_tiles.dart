@@ -25,7 +25,7 @@ Widget _mutedDarkTile(BuildContext context, Widget tileWidget, TileImage tile) {
 TileLayer buildBaseTileLayer() {
   return TileLayer(
     urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    userAgentPackageName: 'com.example.fitness_game_app',
+    userAgentPackageName: 'com.terrarun.app',
     tileBuilder: _mutedDarkTile,
   );
 }
