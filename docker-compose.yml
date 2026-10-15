@@ -29,6 +29,9 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://terrarun:terrarun_secret@db:5432/terrarun
+      # Local only: lets the backend start without SECRET_KEY.
+      # Use docker-compose.prod.yml for a real deployment.
+      APP_ENV: development
     ports:
       - "8000:8000"
     volumes:

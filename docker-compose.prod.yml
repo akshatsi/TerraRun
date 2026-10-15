@@ -1,0 +1,44 @@
+# Production stack. Run it with:
+#
+#   cp .env.example .env     # then fill in the values
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Compared with docker-compose.yml: secrets come from .env, no source is
+# mounted over the image, and the database port is not published. Put TLS in
+# front of the backend (a reverse proxy or the host's load balancer); the
+# mobile app needs an https:// address.
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-terrarun}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-terrarun}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-terrarun}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-terrarun}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
