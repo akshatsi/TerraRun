@@ -1,4 +1,4 @@
-package com.example.fitness_game_app
+package com.terrarun.app
 
 import io.flutter.embedding.android.FlutterActivity
 

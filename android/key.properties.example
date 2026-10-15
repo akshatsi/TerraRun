@@ -1,0 +1,12 @@
+# Copy to android/key.properties and fill in. key.properties and the keystore
+# are ignored by git. Never commit them, and keep a backup of the keystore:
+# losing it means you can no longer update the app on Google Play.
+#
+# Create a keystore with:
+#   keytool -genkey -v -keystore ~/terrarun-upload.jks -keyalg RSA \
+#     -keysize 2048 -validity 10000 -alias upload
+keyAlias=upload
+keyPassword=
+storePassword=
+# An absolute path, or one relative to android/app/.
+storeFile=/absolute/path/to/terrarun-upload.jks
