@@ -4,9 +4,13 @@
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
 # Compared with docker-compose.yml: secrets come from .env, no source is
-# mounted over the image, and the database port is not published. Put TLS in
-# front of the backend (a reverse proxy or the host's load balancer); the
-# mobile app needs an https:// address.
+# mounted over the image, and the database port is not published.
+#
+# The mobile app needs an https:// address. For a server with a domain name,
+# add the "https" profile: it starts Caddy, which gets and renews the
+# certificate itself. Set DOMAIN in .env (and BACKEND_BIND=127.0.0.1):
+#
+#   docker compose -f docker-compose.prod.yml --profile https up -d --build
 
 services:
   db:
@@ -35,10 +39,25 @@ services:
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
     ports:
-      - "8000:8000"
+      - "${BACKEND_BIND:-0.0.0.0}:8000:8000"
     depends_on:
       db:
         condition: service_healthy
 
+  # HTTPS in front of the backend. Only starts with --profile https.
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    command: caddy reverse-proxy --from ${DOMAIN:-localhost} --to backend:8000
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+    depends_on:
+      - backend
+
 volumes:
   pgdata:
+  caddy_data:

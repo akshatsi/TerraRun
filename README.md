@@ -147,9 +147,17 @@ curl http://localhost:8000/
 ```
 
 This starts PostGIS and the backend. It publishes only port 8000, mounts no
-source, and refuses to start without the two secrets. Put TLS in front of
-port 8000 (a reverse proxy or the host's load balancer): the app needs an
-`https://` address.
+source, and refuses to start without the two secrets. The app needs an
+`https://` address, so put TLS in front of port 8000.
+
+On a server with a domain name, the `https` profile does that with Caddy,
+which gets and renews the certificate itself. Add `DOMAIN=api.example.com` and
+`BACKEND_BIND=127.0.0.1` to `.env`, point the domain's DNS at the server, open
+ports 80 and 443, then run:
+
+```bash
+docker compose -f docker-compose.prod.yml --profile https up -d --build
+```
 
 With a managed PostgreSQL instead, build and run the backend alone:
 
