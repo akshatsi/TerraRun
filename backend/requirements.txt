@@ -8,3 +8,4 @@ python-multipart
 pydantic[email]
 geoalchemy2
 shapely
+pyproj
