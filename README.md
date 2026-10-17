@@ -178,10 +178,51 @@ The backend runs `CREATE EXTENSION IF NOT EXISTS postgis` at start, so its
 database role must be allowed to do that. On a managed database, enable PostGIS
 yourself first if it is not.
 
-**No migrations.** Tables come from SQLAlchemy `create_all` on each start. It
-adds missing tables and never changes existing ones, so a new column on a live
-database needs a manual `ALTER TABLE` (or Alembic, which is not set up).
-Back up first: `pg_dump`.
+**Upgrades.** There is no migration tool. `setup_postgis.py` runs on every
+start and is safe to repeat: it creates missing tables, adds new columns with
+`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, and recomputes stored territory
+areas in true square metres. Back up first: `pg_dump`.
+
+### Run upload API
+
+`POST /runs` takes the raw GPS fixes (`lat`, `lng`, `t`, `accuracy_m`,
+`speed_mps`, ...) plus a `client_run_id`. The server, not the phone, decides
+the distance and the territory. See `docs/gps-accuracy.md` for the full request
+and response. The response keeps the old fields (`distance_km`, `avg_speed`,
+`route_geojson`, `territory_geojson`) and adds `processing`, `territory` and
+`duplicate`. Sending the same `client_run_id` again returns the saved run with
+`duplicate: true` and awards nothing.
+
+Old-style payloads (`distance_km`, `route_coordinates` without timestamps) still
+work. The server measures the route itself, marks it `quality: "unverified"`,
+and gives territory under the same rules. A payload with only totals is saved
+as sent and gives no territory.
+
+**Territory rules.** A run that ends within 20 m of its start (and is at least
+100 m long, with little gap) is a `loop`: it earns only the enclosed area. Any
+other run is a `route`: it earns a strip 3 m each side of the road travelled.
+A `poor` run, or one under 50 m, earns nothing (`none`). The `territory` block of
+the response carries `kind` and `reason` next to the areas, and `GET /runs`
+returns them too. After a rule change, rebuild every territory from the stored
+runs (add `--dry-run` first to see the before and after areas per user):
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend python reprocess_territories.py --dry-run
+docker compose -f docker-compose.prod.yml exec backend python reprocess_territories.py
+```
+
+Outside Docker, run `python reprocess_territories.py` in `backend/` with
+`DATABASE_URL` set. Back up first.
+
+Run the backend tests against a throwaway PostGIS:
+
+```bash
+docker run -d --name terrarun_test_db -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test \
+  -e POSTGRES_DB=test -p 55432:5432 postgis/postgis:16-3.4
+cd backend && DATABASE_URL=postgresql://test:test@localhost:55432/test APP_ENV=development \
+  .venv/bin/python -m pytest tests -q
+docker rm -f terrarun_test_db
+```
 
 ### Android
 

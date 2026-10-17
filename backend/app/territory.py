@@ -1,174 +1,217 @@
 """
-Territory capture logic using PostGIS spatial operations.
+Territory capture using PostGIS. See docs/gps-accuracy.md, section 4.
 
-Core mechanic:
-  1. A user's run path (LINESTRING) is buffered into a polygon (~30 m radius).
-  2. That polygon is subtracted from every OTHER user's territory (ST_Difference).
-  3. The polygon is unioned with the runner's own territory (ST_Union).
-  4. Empty or degenerate territories are cleaned up.
+1. ``build_territory_shape`` (app.gps.territory_shape) decides what a run
+   earns from its accepted segments: a LOOP (only the enclosed area), a ROUTE
+   (a flat-ended strip 3 m each side of the road travelled) or NONE. Segments
+   are never joined across a gap.
+2. This module adds the rules that need the run's quality and distance:
+   nothing is awarded when the quality is "poor" or the accepted distance is
+   under MIN_AWARD_DISTANCE_M, and the kind is then "none".
+3. Otherwise the shape is cut out of every rival's territory (a rival left
+   with under MIN_TERRITORY_AREA_SQ_M is deleted) and merged into the runner's
+   own. Stored geometries are always (Multi)Polygon.
+4. Areas are ST_Area(geom::geography), in square metres.
 """
 
-from sqlalchemy.orm import Session
-from sqlalchemy import func
-from geoalchemy2.shape import from_shape, to_shape
-from geoalchemy2 import functions as gfunc
-from shapely.geometry import LineString, mapping
-from shapely.ops import unary_union
-from shapely import wkt
+import json
 
+from shapely import wkb
+from shapely.geometry import LineString, MultiLineString
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.gps.territory_shape import build_territory_shape
 from app.models import Territory
 
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-BUFFER_METERS = 30          # radius around the run path
-SRID_WGS84 = 4326          # GPS coordinates
-SRID_METRIC = 3857         # Web-Mercator for metre-based buffer
+MIN_AWARD_DISTANCE_M = 50    # shorter accepted distance earns nothing
+SRID_WGS84 = 4326
+MIN_TERRITORY_AREA_SQ_M = 1.0  # a rival's remainder below this is deleted
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def build_multilinestring(segments: list[list[tuple[float, float]]]) -> MultiLineString | None:
+    """Segments of (lat, lng) points -> MultiLineString in (lng, lat) order.
 
-def _linestring_from_coords(coords: list[list[float]]) -> LineString | None:
-    """Convert [[lat, lng], ...] to a Shapely LineString (lng, lat order).
-
-    Returns None if fewer than 2 valid points.
+    Segments with fewer than two points are skipped. Returns None if none remain.
     """
-    points = [(lng, lat) for lat, lng in coords if lat is not None and lng is not None]
-    if len(points) < 2:
+    lines = [
+        LineString([(lng, lat) for lat, lng in seg])
+        for seg in segments
+        if len(seg) >= 2
+    ]
+    if not lines:
         return None
-    return LineString(points)
+    return MultiLineString(lines)
 
 
-def _buffer_route_to_polygon(route: LineString, buffer_m: float = BUFFER_METERS):
-    """Buffer a WGS-84 LineString by *buffer_m* metres via Web-Mercator projection.
-
-    We do NOT use pyproj here — instead we let PostGIS handle the transform
-    inside ``claim_territory`` via ST_Transform.  This helper only builds the
-    raw SQL expression.
-    """
-    # We'll push raw WGS-84 linestring into PostGIS and transform there.
-    return route
+def multilinestring_ewkt(mls: MultiLineString) -> str:
+    return f"SRID={SRID_WGS84};{mls.wkt}"
 
 
-# ---------------------------------------------------------------------------
-# Core territory operations (executed inside a DB session)
-# ---------------------------------------------------------------------------
+def user_territory_summary(
+    db: Session, user_id: int, with_geojson: bool = True
+) -> tuple[float, dict | None]:
+    """Return (total area in m2, GeoJSON) of the user's territory."""
+    geo = "ST_AsGeoJSON(geom)" if with_geojson else "NULL"
+    row = db.execute(
+        text(f"SELECT area_sq_m, {geo} FROM territories WHERE user_id = :u"),
+        {"u": user_id},
+    ).first()
+    if row is None:
+        return 0.0, None
+    return float(row[0] or 0.0), (json.loads(row[1]) if row[1] else None)
 
-def claim_territory(user_id: int, route_coords: list[list[float]], db: Session) -> dict:
-    """Run the full territory-claim pipeline and return summary info.
 
-    Parameters
-    ----------
-    user_id : int
-        The authenticated user.
-    route_coords : list[list[float]]
-        GPS coordinates as [[lat, lng], …].
-    db : Session
-        Active SQLAlchemy session (caller must commit/rollback).
-
-    Returns
-    -------
-    dict with keys:
-        claimed_area_sq_m  – area of the newly-claimed polygon (metres²)
-        total_area_sq_m    – user's total territory after this run
-        territory_geojson  – GeoJSON dict of user's full territory
-    """
-    line = _linestring_from_coords(route_coords)
-    if line is None:
-        return {"claimed_area_sq_m": 0, "total_area_sq_m": 0, "territory_geojson": None}
-
-    # --- Step 1: Build the new polygon in PostGIS (buffer in metric CRS) ---
-    line_wkt = line.wkt
-
-    # ST_Buffer in metres using ST_Transform to/from Web-Mercator
-    new_poly_expr = func.ST_Transform(
-        func.ST_Buffer(
-            func.ST_Transform(func.ST_GeomFromText(line_wkt, SRID_WGS84), SRID_METRIC),
-            BUFFER_METERS,
+def _areal_hex(db: Session, geom) -> tuple[str | None, float]:
+    """Shapely geometry -> (hex EWKB of its valid polygon part, area in m2)."""
+    if geom is None or geom.is_empty:
+        return None, 0.0
+    row = db.execute(
+        text(
+            """
+            SELECT ST_AsHexEWKB(g), ST_Area(g::geography)
+            FROM (
+                SELECT ST_CollectionExtract(
+                    ST_MakeValid(ST_GeomFromEWKB(decode(:h, 'hex'))), 3
+                ) AS g
+            ) q
+            """
         ),
-        SRID_WGS84,
-    )
+        {"h": wkb.dumps(geom, hex=True, srid=SRID_WGS84)},
+    ).first()
+    if row is None or row[0] is None:
+        return None, 0.0
+    area = float(row[1] or 0.0)
+    if area <= 0.0:
+        return None, 0.0
+    return row[0], area
 
-    # Materialise into WKT so we can reuse the value
-    new_poly_wkt = db.execute(func.ST_AsText(new_poly_expr)).scalar()
-    if not new_poly_wkt:
-        return {"claimed_area_sq_m": 0, "total_area_sq_m": 0, "territory_geojson": None}
 
-    new_poly_geom = func.ST_GeomFromText(new_poly_wkt, SRID_WGS84)
+def award_run(
+    db: Session,
+    user_id: int,
+    segments: list[list[tuple[float, float]]],
+    quality: str,
+    distance_m: float,
+    uncertain_distance_m: float = 0.0,
+) -> dict:
+    """Build the shape for one run and award it. The caller commits.
 
-    # --- Step 2: Subtract from every other user's territory ---------------
-    rival_territories = (
-        db.query(Territory)
-        .filter(Territory.user_id != user_id)
-        .all()
-    )
+    Returns a dict with:
+        kind                  "loop" | "route" | "none"
+        reason                short explanation
+        route_ewkt            EWKT of the processed MultiLineString, or None
+        corridor_hex          hex EWKB of the shape before rival handling, or None
+        awarded_hex           hex EWKB of the awarded geometry, or None
+        observed_area_sq_m
+        awarded_area_sq_m
+    """
+    mls = build_multilinestring(segments)
+    shape = build_territory_shape(segments, uncertain_distance_m)
+    corridor_hex, observed_area = _areal_hex(db, shape.geometry)
 
-    for rival in rival_territories:
-        diff = db.execute(
-            func.ST_AsText(
-                func.ST_Difference(rival.geom, new_poly_geom)
-            )
-        ).scalar()
+    kind, reason = shape.kind, shape.reason
+    if quality == "poor":
+        kind, reason = "none", "GPS quality too poor to award territory"
+    elif distance_m < MIN_AWARD_DISTANCE_M:
+        kind, reason = "none", f"under {MIN_AWARD_DISTANCE_M} m accepted distance"
+    elif corridor_hex is None:
+        kind = "none"
 
-        if diff is None or diff == "GEOMETRYCOLLECTION EMPTY":
-            db.delete(rival)
-        else:
-            rival.geom = func.ST_GeomFromText(diff, SRID_WGS84)
-            # Recompute area (in sq metres via Web-Mercator)
-            rival.area_sq_m = db.execute(
-                func.ST_Area(func.ST_Transform(func.ST_GeomFromText(diff, SRID_WGS84), SRID_METRIC))
-            ).scalar() or 0.0
-
-    # --- Step 3: Union with user's own territory --------------------------
-    own = (
-        db.query(Territory)
-        .filter(Territory.user_id == user_id)
-        .first()
-    )
-
-    if own is None:
-        # First territory for this user
-        area = db.execute(
-            func.ST_Area(func.ST_Transform(new_poly_geom, SRID_METRIC))
-        ).scalar() or 0.0
-
-        own = Territory(
-            user_id=user_id,
-            geom=func.ST_GeomFromText(new_poly_wkt, SRID_WGS84),
-            area_sq_m=area,
-        )
-        db.add(own)
-    else:
-        merged_wkt = db.execute(
-            func.ST_AsText(
-                func.ST_Union(own.geom, new_poly_geom)
-            )
-        ).scalar()
-        own.geom = func.ST_GeomFromText(merged_wkt, SRID_WGS84)
-        own.area_sq_m = db.execute(
-            func.ST_Area(func.ST_Transform(func.ST_GeomFromText(merged_wkt, SRID_WGS84), SRID_METRIC))
-        ).scalar() or 0.0
-
-    db.flush()  # so own.area_sq_m is populated
-
-    # --- Step 4: Build response -------------------------------------------
-    territory_geojson_str = db.execute(
-        func.ST_AsGeoJSON(own.geom)
-    ).scalar()
-
-    import json
-    territory_geojson = json.loads(territory_geojson_str) if territory_geojson_str else None
-
-    claimed_area = db.execute(
-        func.ST_Area(func.ST_Transform(new_poly_geom, SRID_METRIC))
-    ).scalar() or 0.0
-
-    return {
-        "claimed_area_sq_m": round(claimed_area, 2),
-        "total_area_sq_m": round(own.area_sq_m, 2),
-        "territory_geojson": territory_geojson,
+    result = {
+        "kind": kind,
+        "reason": reason,
+        "route_ewkt": multilinestring_ewkt(mls) if mls is not None else None,
+        "corridor_hex": corridor_hex,
+        "awarded_hex": None,
+        "observed_area_sq_m": observed_area,
+        "awarded_area_sq_m": 0.0,
     }
+    if kind != "none" and corridor_hex:
+        award_polygon(db, user_id, corridor_hex)
+        result["awarded_hex"] = corridor_hex
+        result["awarded_area_sq_m"] = observed_area
+    return result
+
+
+def claim_territory(
+    db: Session,
+    user_id: int,
+    segments: list[list[tuple[float, float]]],
+    quality: str,
+    distance_m: float,
+    uncertain_distance_m: float = 0.0,
+) -> dict:
+    """award_run plus the user's total area and GeoJSON afterwards."""
+    result = award_run(db, user_id, segments, quality, distance_m, uncertain_distance_m)
+    total, geojson = user_territory_summary(db, user_id)
+    result["total_area_sq_m"] = total
+    result["territory_geojson"] = geojson
+    return result
+
+
+def award_polygon(db: Session, user_id: int, awarded_hex: str) -> None:
+    """Cut the polygon out of rivals and merge it into the user's territory."""
+    params = {"h": awarded_hex, "u": user_id}
+    awarded = "ST_GeomFromEWKB(decode(:h, 'hex'))"
+
+    # Rivals: subtract, keep only areal parts, recompute area, drop the empty.
+    db.execute(
+        text(
+            f"""
+            UPDATE territories
+            SET geom = ST_CollectionExtract(ST_MakeValid(ST_Difference(geom, {awarded})), 3),
+                updated_at = now()
+            WHERE user_id <> :u AND geom && {awarded} AND ST_Intersects(geom, {awarded})
+            """
+        ),
+        params,
+    )
+    db.execute(
+        text(
+            f"""
+            UPDATE territories SET area_sq_m = ST_Area(geom::geography)
+            WHERE user_id <> :u AND geom && {awarded} AND NOT ST_IsEmpty(geom)
+            """
+        ),
+        params,
+    )
+    # Drop what is left of a rival when nothing real remains (empty, or float
+    # noise from the cut).
+    db.execute(
+        text(
+            "DELETE FROM territories WHERE user_id <> :u "
+            "AND (ST_IsEmpty(geom) OR area_sq_m < :min_area)"
+        ),
+        {"u": user_id, "min_area": MIN_TERRITORY_AREA_SQ_M},
+    )
+
+    own = db.query(Territory.id).filter(Territory.user_id == user_id).first()
+    if own is None:
+        db.execute(
+            text(
+                f"""
+                INSERT INTO territories (user_id, geom, area_sq_m)
+                VALUES (:u, ST_CollectionExtract(ST_MakeValid({awarded}), 3),
+                        ST_Area(ST_CollectionExtract(ST_MakeValid({awarded}), 3)::geography))
+                """
+            ),
+            params,
+        )
+    else:
+        db.execute(
+            text(
+                f"""
+                UPDATE territories
+                SET geom = ST_CollectionExtract(ST_MakeValid(ST_Union(geom, {awarded})), 3),
+                    updated_at = now()
+                WHERE user_id = :u
+                """
+            ),
+            params,
+        )
+        db.execute(
+            text("UPDATE territories SET area_sq_m = ST_Area(geom::geography) WHERE user_id = :u"),
+            params,
+        )
+    db.flush()
