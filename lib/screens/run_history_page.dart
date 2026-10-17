@@ -54,11 +54,36 @@ class _RunHistoryPageState extends State<RunHistoryPage> {
     }
   }
 
+  ({String label, Color color})? _quality(dynamic value) {
+    return switch (value) {
+      'good' => (label: 'Good', color: AppColors.success),
+      'fair' => (label: 'Fair', color: AppColors.gold),
+      'poor' => (label: 'Poor', color: AppColors.danger),
+      _ => null,
+    };
+  }
+
+  String? _territoryKind(dynamic run) {
+    final territory = run['territory'];
+    final kind = territory is Map ? territory['kind'] : run['territory_kind'];
+    return switch (kind) {
+      'loop' => 'Loop',
+      'route' => 'Route',
+      _ => null,
+    };
+  }
+
   Widget _runCard(dynamic run) {
     final distance = (run['distance_km'] ?? 0).toDouble();
     final duration = (run['duration_seconds'] ?? 0) as int;
     final avgSpeed = (run['avg_speed'] ?? 0).toDouble();
     final createdAt = run['created_at']?.toString() ?? '';
+    final processing = run['processing'];
+    final quality = _quality(
+      processing is Map ? processing['quality'] : run['quality'],
+    );
+
+    final kind = _territoryKind(run);
 
     return AppCard(
       margin: const EdgeInsets.only(bottom: 12),
@@ -66,7 +91,31 @@ class _RunHistoryPageState extends State<RunHistoryPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_formatDate(createdAt).toUpperCase(), style: AppText.overline),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _formatDate(createdAt).toUpperCase(),
+                  style: AppText.overline,
+                ),
+              ),
+              if (kind != null)
+                Text(
+                  quality == null ? kind : '$kind · ',
+                  style: AppText.caption.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              if (quality != null)
+                Text(
+                  '${quality.label} GPS',
+                  style: AppText.caption.copyWith(
+                    color: quality.color,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: 14),
           Row(
             children: [

@@ -4,8 +4,11 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../data/run_data.dart';
+import '../gps/run_fix.dart';
+import '../gps/track_filter.dart';
 import '../services/location_service.dart';
 import '../services/run_service.dart';
+import '../services/run_store.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
 import '../widgets/app_widgets.dart';
@@ -37,8 +40,13 @@ class _RunPageState extends State<RunPage> {
 
   Timer? timer;
   StreamSubscription<Position>? positionStream;
-  Position? lastPosition;
 
+  // Every fix of the run goes to the recorder; the filter only decides what
+  // counts toward the live distance and route.
+  TrackFilter _filter = TrackFilter();
+  RunRecorder? _recorder;
+
+  // Accepted points, flat; used for loop detection.
   final List<RunPoint> runPath = [];
 
   LatLng get currentLatLng => LatLng(
@@ -46,9 +54,11 @@ class _RunPageState extends State<RunPage> {
     RunDataStore.currentLongitude ?? 77.2090,
   );
 
-  List<LatLng> get latestPathPoints {
-    return runPath.map((p) => LatLng(p.latitude, p.longitude)).toList();
-  }
+  /// One line per segment, so none is drawn across a GPS gap.
+  List<List<LatLng>> get _routeLines => [
+    for (final segment in _filter.segments)
+      if (segment.length >= 2) [for (final f in segment) LatLng(f.lat, f.lng)],
+  ];
 
   @override
   void initState() {
@@ -83,11 +93,26 @@ class _RunPageState extends State<RunPage> {
   String get _bannerText {
     if (isRunning) {
       return _gpsOk
-          ? 'GPS acquired'
+          ? (_loopHint ?? 'GPS acquired')
           : (LocationService.hint ?? 'Waiting for GPS…');
     }
     if (statusText != _readyText) return statusText;
     return LocationService.hint ?? _readyText;
+  }
+
+  /// Shown once the path is long enough for a loop and the runner is near
+  /// the start.
+  String? get _loopHint {
+    if (!isRunning || !_filter.loopLongEnough) return null;
+    final d = _filter.startDistanceM;
+    if (d == null) return null;
+    if (_filter.isLoopClosed) {
+      return 'Loop closed — stop now to claim the enclosed area';
+    }
+    if (d <= _filter.config.loopHintRadiusM) {
+      return 'Start point ${d.round()} m away — close the loop to claim the area';
+    }
+    return null;
   }
 
   String? get _bannerDetail {
@@ -108,20 +133,6 @@ class _RunPageState extends State<RunPage> {
     } else {
       LocationService.requestFix();
     }
-  }
-
-  bool _isLoopClosed(List<RunPoint> path) {
-    if (path.length < 4) return false;
-
-    final start = path.first;
-    final end = path.last;
-
-    const threshold = 0.0003;
-
-    final latDiff = (start.latitude - end.latitude).abs();
-    final lngDiff = (start.longitude - end.longitude).abs();
-
-    return latDiff < threshold && lngDiff < threshold;
   }
 
   void _recalculateAvgSpeed() {
@@ -157,6 +168,8 @@ class _RunPageState extends State<RunPage> {
     timer?.cancel();
     await positionStream?.cancel();
 
+    final recorder = await RunRecorder.start();
+
     if (!mounted) return;
     setState(() {
       isRunning = true;
@@ -164,7 +177,8 @@ class _RunPageState extends State<RunPage> {
       runPath.clear();
       RunDataStore.latestRunPath = [];
       RunDataStore.isRunActive = true;
-      lastPosition = null;
+      _filter = TrackFilter();
+      _recorder = recorder;
       secondsElapsed = 0;
       distanceKm = 0.0;
       avgSpeed = 0.0;
@@ -192,34 +206,17 @@ class _RunPageState extends State<RunPage> {
   void _onRunPosition(Position position, {bool publish = true}) {
     if (!mounted) return;
 
-    final point = RunPoint(
-      latitude: position.latitude,
-      longitude: position.longitude,
-    );
-
-    double addedKm = 0.0;
-
-    if (lastPosition != null) {
-      final meters = Geolocator.distanceBetween(
-        lastPosition!.latitude,
-        lastPosition!.longitude,
-        position.latitude,
-        position.longitude,
-      );
-
-      // Ignore clearly bad GPS jumps and tiny noise
-      if (meters >= 2 && meters <= 50) {
-        addedKm = meters / 1000;
-      }
-    }
-
-    lastPosition = position;
+    final fix = RunFix.fromPosition(position);
+    _recorder?.add(fix);
+    final decision = _filter.add(fix);
 
     setState(() {
-      runPath.add(point);
-      RunDataStore.latestRunPath = List.from(runPath);
+      if (decision.accepted) {
+        runPath.add(RunPoint(latitude: fix.lat, longitude: fix.lng));
+        RunDataStore.latestRunPath = List.from(runPath);
+      }
 
-      distanceKm += addedKm;
+      distanceKm = _filter.distanceKm;
       _recalculateAvgSpeed();
     });
 
@@ -233,21 +230,6 @@ class _RunPageState extends State<RunPage> {
     timer?.cancel();
     await positionStream?.cancel();
 
-    final closedLoop = _isLoopClosed(runPath);
-
-    if (closedLoop) {
-      RunDataStore.capturedAreas.insert(
-        0,
-        CapturedArea(
-          name:
-              'My Loop ${RunDataStore.capturedAreas.where((a) => a.isMine).length + 1}',
-          points: List.from(runPath),
-          progress: 100,
-          isMine: true,
-        ),
-      );
-    }
-
     if (!mounted) return;
     setState(() {
       isRunning = false;
@@ -256,41 +238,69 @@ class _RunPageState extends State<RunPage> {
       statusText = 'Saving run...';
     });
 
-    // Convert tracked GPS points to [[lat, lng], …] for territory capture
-    final List<List<double>> routeCoords = runPath
-        .map((p) => [p.latitude, p.longitude])
-        .toList();
+    final recorder = _recorder;
+    String? summary;
+    var hasTerritoryData = false;
+    var uploaded = false;
+    var queued = false;
 
-    final result = await RunService.saveRun(
-      distanceKm: distanceKm,
-      durationSeconds: secondsElapsed,
-      avgSpeed: avgSpeed,
-      routeCoordinates: routeCoords.length >= 2 ? routeCoords : null,
-    );
+    if (recorder != null) {
+      final endedAt = DateTime.now().toUtc();
+      await recorder.flush();
+      await RunQueue.enqueue(
+        buildRunPayload(
+          clientRunId: recorder.clientRunId,
+          startedAt: recorder.startedAt,
+          endedAt: endedAt,
+          durationSeconds: secondsElapsed,
+          clientDistanceKm: _filter.distanceKm,
+          fixes: recorder.fixes,
+        ),
+      );
+      await recorder.discard();
+      _recorder = null;
+      queued = true;
+
+      // Sends this run and any earlier one still waiting.
+      await RunQueue.flush();
+      final data = RunQueue.saved.remove(recorder.clientRunId);
+      uploaded =
+          data != null || !await RunQueue.isPending(recorder.clientRunId);
+      summary = RunService.saveSummary(data);
+
+      final server = data is Map ? data : null;
+      final serverKm = (server?['distance_km'] as num?)?.toDouble();
+      final serverSpeed = (server?['avg_speed'] as num?)?.toDouble();
+      if (serverKm != null && mounted) {
+        setState(() {
+          distanceKm = serverKm;
+          if (serverSpeed != null) avgSpeed = serverSpeed;
+        });
+      }
+      if (server != null) {
+        hasTerritoryData = server['territory_geojson'] != null;
+      }
+    }
 
     if (!mounted) return;
 
-    final hasTerritoryData =
-        result['success'] == true &&
-        result['data'] is Map &&
-        result['data']['territory_geojson'] != null;
-
     setState(() {
       isSavingRun = false;
-      statusText = result['success'] == true
-          ? (hasTerritoryData
-                ? 'Territory claimed! Run saved'
-                : closedLoop
-                ? 'Loop captured and run saved'
-                : 'Run saved')
+      statusText = uploaded
+          ? (hasTerritoryData ? 'Territory claimed! Run saved' : 'Run saved')
+          : queued
+          ? 'Run kept on this phone, will upload later'
           : 'Run stopped, but save failed';
     });
 
-    final message = result['success'] == true
-        ? (hasTerritoryData
-              ? 'Run saved — territory captured!'
-              : 'Run saved successfully')
-        : (result['message']?.toString() ?? 'Failed to save run');
+    final message = uploaded
+        ? (summary ??
+              (hasTerritoryData
+                  ? 'Run saved — territory captured!'
+                  : 'Run saved successfully'))
+        : queued
+        ? 'No connection. Your run is saved on this phone and will upload later.'
+        : 'Failed to save run';
 
     ScaffoldMessenger.of(
       context,
@@ -309,7 +319,7 @@ class _RunPageState extends State<RunPage> {
       distanceKm = 0.0;
       avgSpeed = 0.0;
       statusText = _readyText;
-      lastPosition = null;
+      _filter = TrackFilter();
       runPath.clear();
       RunDataStore.latestRunPath = [];
     });
@@ -510,16 +520,16 @@ class _RunPageState extends State<RunPage> {
             ),
             children: [
               buildBaseTileLayer(),
-              if (latestPathPoints.length >= 2)
-                PolylineLayer(
-                  polylines: [
+              PolylineLayer(
+                polylines: [
+                  for (final line in _routeLines)
                     Polyline(
-                      points: latestPathPoints,
+                      points: line,
                       strokeWidth: 5,
                       color: AppColors.pink,
                     ),
-                  ],
-                ),
+                ],
+              ),
               MarkerLayer(
                 markers: [
                   if (_hasFix)

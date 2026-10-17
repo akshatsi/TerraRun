@@ -178,7 +178,8 @@ class LocationService {
   /// and background updates on iOS.
   static LocationSettings runSettings() {
     const accuracy = LocationAccuracy.best;
-    const distanceFilter = 3;
+    // No distance filter: every fix goes to the run, about once a second.
+    const distanceFilter = 0;
 
     if (kIsWeb) {
       return const LocationSettings(
@@ -192,6 +193,7 @@ class LocationService {
         return AndroidSettings(
           accuracy: accuracy,
           distanceFilter: distanceFilter,
+          intervalDuration: const Duration(seconds: 1),
           foregroundNotificationConfig: const ForegroundNotificationConfig(
             notificationTitle: 'TerraRun is tracking your run',
             notificationText: 'Your route is being recorded.',

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import '../data/run_data.dart';
 import '../services/location_service.dart';
+import '../services/run_store.dart';
 import '../theme/app_theme.dart';
 import 'home_page.dart';
 import 'run_page.dart';
@@ -36,6 +38,24 @@ class _MainNavigationState extends State<MainNavigation>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     LocationService.startPassive();
+    _uploadSavedRuns(recover: true);
+  }
+
+  /// Sends runs that never reached the server, including one an earlier
+  /// launch left unfinished.
+  Future<void> _uploadSavedRuns({bool recover = false}) async {
+    var recovered = false;
+    if (recover && !RunDataStore.isRunActive) {
+      recovered = await RunQueue.recoverUnfinished();
+    }
+    await RunQueue.flush();
+
+    if (!recovered || !mounted) return;
+    if ((await RunQueue.pending()).isNotEmpty) return;
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Uploaded an unfinished run')));
   }
 
   @override
@@ -47,7 +67,10 @@ class _MainNavigationState extends State<MainNavigation>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) LocationService.resume();
+    if (state == AppLifecycleState.resumed) {
+      LocationService.resume();
+      RunQueue.flush();
+    }
   }
 
   void onItemTapped(int index) {

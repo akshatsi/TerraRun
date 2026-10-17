@@ -2,14 +2,14 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'auth_service.dart';
 import '../config.dart';
+import '../utils/format.dart';
 
 class RunService {
-    static Future<Map<String, dynamic>> saveRun({
-    required double distanceKm,
-    required int durationSeconds,
-    required double avgSpeed,
-    List<List<double>>? routeCoordinates,
-  }) async {
+  /// Uploads a run payload (see `buildRunPayload`). The result has `network:
+  /// true` when the request never got an answer.
+  static Future<Map<String, dynamic>> saveRun(
+    Map<String, dynamic> payload,
+  ) async {
     try {
       final token = await AuthService.getToken();
 
@@ -22,48 +22,88 @@ class RunService {
 
       final uri = Uri.parse('${Config.baseUrl}/runs');
 
-      final body = <String, dynamic>{
-        'distance_km': distanceKm,
-        'duration_seconds': durationSeconds,
-        'avg_speed': avgSpeed,
-      };
+      final response = await http
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 60));
 
-      // --- NEW: send GPS coordinates if available ---
-      if (routeCoordinates != null && routeCoordinates.length >= 2) {
-        body['route_coordinates'] = routeCoordinates;
-      }
-
-      final response = await http.post(
-        uri,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(body),
-      );
-
-      final data =
-          response.body.isNotEmpty ? jsonDecode(response.body) : {};
+      dynamic data = {};
+      try {
+        if (response.body.isNotEmpty) data = jsonDecode(response.body);
+      } catch (_) {}
 
       if (response.statusCode == 200) {
-        return {
-          'success': true,
-          'message': 'Run saved',
-          'data': data,
-        };
+        return {'success': true, 'message': 'Run saved', 'data': data};
       }
 
       return {
         'success': false,
-        'message': data['detail'] ?? 'Failed to save run',
+        'message':
+            (data is Map ? data['detail'] : null) ?? 'Failed to save run',
       };
     } catch (e) {
       return {
         'success': false,
+        'network': true,
         'message': 'Save run error: $e',
       };
     }
+  }
+
+  /// "Loop claimed · 3,240 m²" or "Route claimed · 840 m²" from the
+  /// response's `territory` block. Null for kind "none", or when the server
+  /// sent no `kind` (an older server).
+  static String? territoryHeadline(dynamic data) {
+    if (data is! Map || data['territory'] is! Map) return null;
+    final territory = data['territory'] as Map;
+    final label = switch (territory['kind']) {
+      'loop' => 'Loop',
+      'route' => 'Route',
+      _ => null,
+    };
+    if (label == null) return null;
+
+    final sqm = (territory['awarded_area_sq_m'] as num?)?.toDouble() ?? 0;
+    final a = Fmt.area(sqm);
+    final value = a.unit == 'M²'
+        ? a.value.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',')
+        : a.value;
+    return '$label claimed · $value ${a.unit.toLowerCase()}';
+  }
+
+  /// One line on a saved run from the server's answer, such as
+  /// "Saved 4.71 km · 1 GPS gap not counted". For a loop or route the first
+  /// part is the territory headline instead. Null when the server sent no
+  /// `processing` block (an older server).
+  static String? saveSummary(dynamic data) {
+    if (data is! Map || data['processing'] is! Map) return null;
+    final processing = data['processing'] as Map;
+
+    final km = (data['distance_km'] as num?)?.toDouble();
+    final parts = <String>[
+      territoryHeadline(data) ??
+          (km == null ? 'Saved' : 'Saved ${km.toStringAsFixed(2)} km'),
+    ];
+
+    final gaps = (processing['gap_count'] as num?)?.toInt() ?? 0;
+    if (gaps > 0) {
+      parts.add('$gaps GPS gap${gaps == 1 ? '' : 's'} not counted');
+    }
+
+    switch (processing['quality']) {
+      case 'poor':
+        parts.add('poor GPS quality');
+      case 'unverified':
+        parts.add('route not verified');
+    }
+    return parts.join(' · ');
   }
 
   static Future<Map<String, dynamic>> getRuns() async {
@@ -87,14 +127,10 @@ class RunService {
         },
       );
 
-      final data =
-          response.body.isNotEmpty ? jsonDecode(response.body) : [];
+      final data = response.body.isNotEmpty ? jsonDecode(response.body) : [];
 
       if (response.statusCode == 200) {
-        return {
-          'success': true,
-          'runs': data,
-        };
+        return {'success': true, 'runs': data};
       }
 
       return {
@@ -102,10 +138,7 @@ class RunService {
         'message': data['detail'] ?? 'Failed to fetch runs',
       };
     } catch (e) {
-      return {
-        'success': false,
-        'message': 'Fetch runs error: $e',
-      };
+      return {'success': false, 'message': 'Fetch runs error: $e'};
     }
   }
 }
