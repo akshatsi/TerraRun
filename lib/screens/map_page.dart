@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../data/run_data.dart';
+import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/stats_service.dart';
 import '../services/territory_service.dart';
@@ -10,6 +12,7 @@ import '../theme/app_theme.dart';
 import '../utils/format.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/map_tiles.dart';
+import 'friends_page.dart';
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -34,8 +37,9 @@ class _MapPageState extends State<MapPage> {
   // The map follows the user until they drag it; the target button resumes.
   bool _following = true;
 
-  // 0 = all players, 1 = only my territory
-  int _filterIndex = 0;
+  // Index into TerritoryService.scopes: all players, friends, mine.
+  int _scopeIndex = 0;
+  int? _myUserId;
 
   // --- Territory data ---
   List<Map<String, dynamic>> _territories = [];
@@ -73,6 +77,9 @@ class _MapPageState extends State<MapPage> {
     LocationService.latest.addListener(_followLatest);
     _loadRuns();
     _loadTerritories();
+    AuthService.getUserId().then((id) {
+      if (mounted) setState(() => _myUserId = id);
+    });
 
     followTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
@@ -114,9 +121,10 @@ class _MapPageState extends State<MapPage> {
   }
 
   Future<void> _loadTerritories() async {
-    final result = await TerritoryService.getAllTerritories();
+    final scope = TerritoryService.scopes[_scopeIndex];
+    final result = await TerritoryService.getAllTerritories(scope: scope);
 
-    if (!mounted) return;
+    if (!mounted || scope != TerritoryService.scopes[_scopeIndex]) return;
 
     if (result['success'] == true) {
       final data = result['data'] as Map<String, dynamic>;
@@ -125,6 +133,8 @@ class _MapPageState extends State<MapPage> {
       setState(() {
         _territories = list.cast<Map<String, dynamic>>();
       });
+    } else {
+      setState(() => _territories = []);
     }
 
     // Also fetch my territory area
@@ -177,18 +187,10 @@ class _MapPageState extends State<MapPage> {
     return polygons;
   }
 
-  /// Generate a color for a given user_id (deterministic).
+  /// A colour for a user: near-white for you, a muted palette hue for rivals.
   Color _colorForUser(int userId, bool isMe) {
-    if (isMe) return AppColors.purple;
-    const palette = [
-      Color(0xFFFF8A4C),
-      Color(0xFF3DD6B0),
-      Color(0xFFF5C542),
-      Color(0xFF5B8DEF),
-      Color(0xFF8BD450),
-      Color(0xFFFF5C7A),
-      Color(0xFF4CC9F0),
-    ];
+    if (isMe) return AppColors.mine;
+    const palette = AppColors.rivalPalette;
     return palette[userId % palette.length];
   }
 
@@ -199,8 +201,19 @@ class _MapPageState extends State<MapPage> {
     super.dispose();
   }
 
-  void _refreshAll() {
-    _loadRuns();
+  Future<void> _openSearch() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const FriendsPage(focusSearch: true)),
+    );
+    if (!mounted) return;
+    _loadTerritories();
+  }
+
+  Future<void> _openFriends() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const FriendsPage()));
+    if (!mounted) return;
     _loadTerritories();
   }
 
@@ -209,18 +222,10 @@ class _MapPageState extends State<MapPage> {
     // Build territory polygon layers
     final List<Polygon> territoryPolygons = [];
 
-    // Get current user ID from territories to determine "isMe"
-    // We'll use a simple heuristic: if user_name matches stored userName
     for (final t in _territories) {
       final geojson = t['geojson'] as Map<String, dynamic>?;
       final userId = (t['user_id'] as num?)?.toInt() ?? 0;
-      final area = ((t['area_sq_m'] ?? 0) as num).toDouble();
-
-      // Determine if this is the current user's territory
-      // (we check if area matches our own territory area — simple approach)
-      final isMe = area > 0 && (area - _myTerritoryArea).abs() < 1.0;
-
-      if (_filterIndex == 1 && !isMe) continue;
+      final isMe = _scopeIndex == 2 || userId == _myUserId;
 
       final color = _colorForUser(userId, isMe);
       final polyPoints = _parseGeoJsonPolygons(geojson);
@@ -230,8 +235,10 @@ class _MapPageState extends State<MapPage> {
           territoryPolygons.add(
             Polygon(
               points: points,
-              color: color.withValues(alpha: isMe ? 0.5 : 0.3),
-              borderColor: color.withValues(alpha: 0.85),
+              color: color.withValues(
+                alpha: isMe ? AppColors.mineFillOpacity : 0.25,
+              ),
+              borderColor: color,
               borderStrokeWidth: 2,
             ),
           );
@@ -252,7 +259,7 @@ class _MapPageState extends State<MapPage> {
     final subText = _totalRuns == 0
         ? 'Start your first run to claim territory'
         : _myTerritoryArea > 0
-        ? '${_territories.length} players on the map'
+        ? '${_territories.length} ${_territories.length == 1 ? 'player' : 'players'} on the map'
         : 'Total distance covered: ${_totalDistance.toStringAsFixed(2)} km';
 
     final area = Fmt.area(_myTerritoryArea);
@@ -288,7 +295,7 @@ class _MapPageState extends State<MapPage> {
                     Polyline(
                       points: latestPathPoints,
                       strokeWidth: 4,
-                      color: AppColors.pink,
+                      color: AppColors.mine,
                     ),
                   ],
                 ),
@@ -301,15 +308,9 @@ class _MapPageState extends State<MapPage> {
                       height: 28,
                       child: Container(
                         decoration: BoxDecoration(
-                          color: AppColors.pink,
+                          color: AppColors.text,
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 3),
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppColors.pink.withValues(alpha: 0.55),
-                              blurRadius: 14,
-                            ),
-                          ],
+                          border: Border.all(color: AppColors.bg, width: 4),
                         ),
                       ),
                     ),
@@ -320,12 +321,32 @@ class _MapPageState extends State<MapPage> {
           SafeArea(
             child: Column(
               children: [
+                // Search sits alone in the top-left corner, above the filter,
+                // so the three filter labels keep the full width at 360 px.
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    child: IconCircleButton(
+                      icon: Icons.search_rounded,
+                      onTap: _openSearch,
+                    ),
+                  ),
+                ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
                   child: SegmentedPill(
-                    labels: const ['All players', 'My territory'],
-                    index: _filterIndex,
-                    onChanged: (i) => setState(() => _filterIndex = i),
+                    background: AppColors.surface,
+                    labels: const ['All players', 'Friends', 'My territory'],
+                    index: _scopeIndex,
+                    onChanged: (i) {
+                      if (i == _scopeIndex) return;
+                      setState(() {
+                        _scopeIndex = i;
+                        _territories = [];
+                      });
+                      _loadTerritories();
+                    },
                   ),
                 ),
                 if (!hasLiveLocation && LocationService.hint != null)
@@ -338,26 +359,25 @@ class _MapPageState extends State<MapPage> {
                         vertical: 10,
                       ),
                       decoration: BoxDecoration(
-                        color: AppColors.surface.withValues(alpha: 0.94),
-                        borderRadius: BorderRadius.circular(18),
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(AppRadius.card),
                         border: Border.all(
-                          color: AppColors.gold.withValues(alpha: 0.5),
+                          color: AppColors.warning.withValues(alpha: 0.5),
                         ),
                       ),
                       child: Row(
                         children: [
                           const Icon(
                             Icons.location_off_rounded,
-                            color: AppColors.gold,
+                            color: AppColors.warning,
                             size: 18,
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               LocationService.hint!,
-                              style: AppText.caption.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
+                              style: AppText.label.copyWith(
+                                color: AppColors.text,
                               ),
                             ),
                           ),
@@ -374,14 +394,12 @@ class _MapPageState extends State<MapPage> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           IconCircleButton(
-                            icon: Icons.refresh_rounded,
-                            solid: true,
-                            onTap: _refreshAll,
+                            icon: Icons.group_rounded,
+                            onTap: _openFriends,
                           ),
                           const SizedBox(height: 10),
                           IconCircleButton(
                             icon: Icons.my_location_rounded,
-                            solid: true,
                             active: _following && hasLiveLocation,
                             onTap: () {
                               setState(() => _following = true);
@@ -398,95 +416,52 @@ class _MapPageState extends State<MapPage> {
                     ),
                   ),
                 ),
-                Container(
+                ShadCard(
+                  width: double.infinity,
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(28),
-                    ),
-                    border: Border.all(color: AppColors.border),
+                  backgroundColor: AppColors.surface,
+                  radius: const BorderRadius.vertical(
+                    top: Radius.circular(AppRadius.card),
                   ),
                   child: SafeArea(
                     top: false,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Container(
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                        ),
+                        Text(statusText, style: AppText.headline),
+                        const SizedBox(height: 3),
+                        Text(subText, style: AppText.bodySecondary),
                         const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Container(
-                              width: 42,
-                              height: 42,
-                              decoration: const BoxDecoration(
-                                gradient: AppColors.territoryGradient,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.flag_rounded,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(statusText, style: AppText.subtitle),
-                                  const SizedBox(height: 3),
-                                  Text(subText, style: AppText.bodySecondary),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 18),
-                        Container(height: 1, color: AppColors.border),
-                        const SizedBox(height: 18),
+                        const AppDivider(),
+                        const SizedBox(height: 16),
                         if (_isLoadingStats)
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 8),
                             child: AppLoader(),
                           )
                         else
-                          Row(
+                          StatRow(
                             children: [
-                              Expanded(
-                                child: StatBlock(
-                                  value: _totalDistance.toStringAsFixed(2),
-                                  unit: 'KM',
-                                  label: 'Distance',
-                                ),
+                              StatBlock(
+                                value: _totalDistance.toStringAsFixed(2),
+                                unit: 'km',
+                                label: 'Distance',
                               ),
-                              Expanded(
-                                child: StatBlock(
-                                  value: _totalRuns.toString(),
-                                  label: 'Runs',
-                                ),
+                              StatBlock(
+                                value: _totalRuns.toString(),
+                                label: 'Runs',
                               ),
-                              Expanded(
-                                child: _myTerritoryArea > 0
-                                    ? StatBlock(
-                                        value: area.value,
-                                        unit: area.unit,
-                                        label: 'Terra area',
-                                        accent: true,
-                                      )
-                                    : const StatBlock(
-                                        value: '—',
-                                        label: 'Terra area',
-                                        accent: true,
-                                      ),
-                              ),
+                              _myTerritoryArea > 0
+                                  ? StatBlock(
+                                      value: area.value,
+                                      unit: area.unit,
+                                      label: 'Terra area',
+                                      valueColor: AppColors.signature,
+                                    )
+                                  : const StatBlock(
+                                      value: '—',
+                                      label: 'Terra area',
+                                    ),
                             ],
                           ),
                       ],

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'signup_page.dart';
 import 'main_navigation.dart';
 import '../services/auth_service.dart';
@@ -96,7 +97,7 @@ class _LoginFormPageState extends State<LoginFormPage> {
           children: [
             ScreenHeader(
               title: 'Log in',
-              leading: IconCircleButton(
+              leading: AppIconButton(
                 icon: Icons.close_rounded,
                 onTap: () => Navigator.pop(context),
               ),
@@ -109,13 +110,7 @@ class _LoginFormPageState extends State<LoginFormPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Headline(
-                        [
-                          HeadlineSpan('Welcome '),
-                          HeadlineSpan('back', emphasis: true, italic: true),
-                          HeadlineSpan('.'),
-                        ],
-                      ),
+                      Text('Welcome back.', style: AppText.title),
                       const SizedBox(height: 8),
                       Text(
                         'Log in to continue your runs and territory progress.',
@@ -136,12 +131,15 @@ class _LoginFormPageState extends State<LoginFormPage> {
                         hint: 'Enter your password',
                         obscure: _obscurePassword,
                         validator: _validatePassword,
-                        suffix: IconButton(
+                        suffix: ShadIconButton.ghost(
                           onPressed: () {
                             setState(() {
                               _obscurePassword = !_obscurePassword;
                             });
                           },
+                          width: 32,
+                          height: 32,
+                          padding: EdgeInsets.zero,
                           icon: Icon(
                             _obscurePassword
                                 ? Icons.visibility_off_rounded
@@ -156,7 +154,7 @@ class _LoginFormPageState extends State<LoginFormPage> {
                         ErrorBanner(_serverError!),
                         const SizedBox(height: 20),
                       ],
-                      GradientButton(
+                      PrimaryButton(
                         label: 'Log in',
                         loading: _isLoading,
                         onPressed: _isLoading ? null : _login,
@@ -181,8 +179,8 @@ class _LoginFormPageState extends State<LoginFormPage> {
                             child: Text(
                               'Sign up',
                               style: AppText.bodySecondary.copyWith(
-                                color: AppColors.pink,
-                                fontWeight: FontWeight.w700,
+                                color: AppColors.text,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
                           ),

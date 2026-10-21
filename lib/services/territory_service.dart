@@ -4,13 +4,25 @@ import 'auth_service.dart';
 import '../config.dart';
 
 class TerritoryService {
-  /// Fetch all users' territories (for rendering on the map).
-  static Future<Map<String, dynamic>> getAllTerritories() async {
+  /// Map scopes in the order the map's switch shows them.
+  static const scopes = ['all', 'friends', 'mine'];
+
+  static Uri uriFor(String scope) {
+    final valid = scopes.contains(scope) ? scope : 'all';
+    return Uri.parse(
+      '${Config.baseUrl}/territories',
+    ).replace(queryParameters: {'scope': valid});
+  }
+
+  /// Fetch territories for rendering on the map: `all`, `friends` or `mine`.
+  static Future<Map<String, dynamic>> getAllTerritories({
+    String scope = 'all',
+  }) async {
     try {
       final token = await AuthService.getToken();
 
       final response = await http.get(
-        Uri.parse('${Config.baseUrl}/territories'),
+        uriFor(scope),
         headers: {
           'Accept': 'application/json',
           if (token != null && token.isNotEmpty)
@@ -18,14 +30,12 @@ class TerritoryService {
         },
       );
 
-      final dynamic data =
-          response.body.isNotEmpty ? jsonDecode(response.body) : {};
+      final dynamic data = response.body.isNotEmpty
+          ? jsonDecode(response.body)
+          : {};
 
       if (response.statusCode == 200) {
-        return {
-          'success': true,
-          'data': data,
-        };
+        return {'success': true, 'data': data};
       }
 
       return {
@@ -35,10 +45,7 @@ class TerritoryService {
             : 'Failed to fetch territories',
       };
     } catch (e) {
-      return {
-        'success': false,
-        'message': 'Territories error: $e',
-      };
+      return {'success': false, 'message': 'Territories error: $e'};
     }
   }
 
@@ -62,14 +69,12 @@ class TerritoryService {
         },
       );
 
-      final dynamic data =
-          response.body.isNotEmpty ? jsonDecode(response.body) : {};
+      final dynamic data = response.body.isNotEmpty
+          ? jsonDecode(response.body)
+          : {};
 
       if (response.statusCode == 200) {
-        return {
-          'success': true,
-          'data': data,
-        };
+        return {'success': true, 'data': data};
       }
 
       return {
@@ -79,10 +84,7 @@ class TerritoryService {
             : 'Failed to fetch territory',
       };
     } catch (e) {
-      return {
-        'success': false,
-        'message': 'Territory error: $e',
-      };
+      return {'success': false, 'message': 'Territory error: $e'};
     }
   }
 }

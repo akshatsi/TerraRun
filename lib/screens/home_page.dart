@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import '../services/stats_service.dart';
 import '../services/auth_service.dart';
+import '../services/social_service.dart';
 import '../services/territory_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
 import '../widgets/app_widgets.dart';
+import 'friends_page.dart';
+import 'run_detail_page.dart';
+import 'runner_profile_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -23,6 +27,10 @@ class _HomePageState extends State<HomePage> {
   String _userName = 'Runner';
   double _territoryArea = 0.0;
 
+  bool _feedLoading = true;
+  String? _feedError;
+  List<Map<String, dynamic>> _feed = [];
+
   @override
   void initState() {
     super.initState();
@@ -40,6 +48,7 @@ class _HomePageState extends State<HomePage> {
 
     // Fetch territory area
     final terrResult = await TerritoryService.getMyTerritory();
+    _loadFeed();
 
     if (!mounted) return;
 
@@ -53,7 +62,9 @@ class _HomePageState extends State<HomePage> {
       }
 
       setState(() {
-        _userName = (userName == null || userName.isEmpty) ? 'Runner' : userName;
+        _userName = (userName == null || userName.isEmpty)
+            ? 'Runner'
+            : userName;
         _totalDistanceKm = (data['total_distance_km'] ?? 0).toDouble();
         _totalRuns = (data['total_runs'] ?? 0) as int;
         _avgSpeed = (data['avg_speed'] ?? 0).toDouble();
@@ -62,68 +73,165 @@ class _HomePageState extends State<HomePage> {
       });
     } else {
       setState(() {
-        _userName = (userName == null || userName.isEmpty) ? 'Runner' : userName;
+        _userName = (userName == null || userName.isEmpty)
+            ? 'Runner'
+            : userName;
         _error = result['message']?.toString() ?? 'Failed to load stats';
         _isLoading = false;
       });
     }
   }
 
-  Widget buildActivityTile({
-    required IconData icon,
-    required Color color,
-    required String title,
-    required String subtitle,
-    required String trailing,
-  }) {
-    return AppCard(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(icon, color: color, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+  Future<void> _loadFeed() async {
+    final result = await SocialService.feed(limit: 5);
+    if (!mounted) return;
+
+    setState(() {
+      _feedLoading = false;
+      if (result['success'] == true && result['data'] is List) {
+        _feed = (result['data'] as List)
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .take(5)
+            .toList();
+        _feedError = null;
+      } else {
+        _feedError = result['message']?.toString() ?? 'Failed to load activity';
+      }
+    });
+  }
+
+  Future<void> _openSearch() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const FriendsPage(focusSearch: true)),
+    );
+    if (mounted) _loadFeed();
+  }
+
+  Future<void> _openFriends() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const FriendsPage()));
+    if (mounted) _loadFeed();
+  }
+
+  Future<void> _openRunner(Map<String, dynamic> user) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RunnerProfilePage(
+          userId: (user['id'] as num).toInt(),
+          name: user['name']?.toString() ?? '',
+        ),
+      ),
+    );
+    if (mounted) _loadFeed();
+  }
+
+  Future<void> _openRun(int id) async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => RunDetailPage(runId: id)));
+  }
+
+  Widget _buildFeedTile(Map<String, dynamic> item) {
+    final user = Map<String, dynamic>.from((item['user'] ?? {}) as Map);
+    final name = user['name']?.toString() ?? 'Runner';
+    final first = name.split(' ').first;
+
+    return Column(
+      children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: item['run_id'] == null
+              ? (user['id'] == null ? null : () => _openRunner(user))
+              : () => _openRun((item['run_id'] as num).toInt()),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Row(
               children: [
-                Text(title, style: AppText.subtitle),
-                const SizedBox(height: 3),
-                Text(subtitle, style: AppText.bodySecondary),
+                Avatar(name: name, size: 40),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '$first ran',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.body.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        Fmt.runSummary(item),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.bodySecondary,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  Fmt.timeAgoFrom(item['created_at']?.toString()),
+                  style: AppText.caption,
+                ),
               ],
             ),
           ),
-          Text(trailing, style: AppText.overline),
-        ],
-      ),
+        ),
+        const AppDivider(),
+      ],
     );
   }
 
-  Widget _buildHeader() {
-    final initial = _userName.isNotEmpty ? _userName[0].toUpperCase() : 'R';
+  Widget _buildFeed() {
+    if (_feedLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(child: AppLoader()),
+      );
+    }
+    if (_feedError != null) {
+      return ErrorBanner(_feedError!);
+    }
+    if (_feed.isEmpty) {
+      return AppCard(
+        child: Column(
+          children: [
+            const Icon(
+              Icons.people_outline_rounded,
+              color: AppColors.textMuted,
+              size: 28,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Follow runners to see their runs here',
+              textAlign: TextAlign.center,
+              style: AppText.body,
+            ),
+            const SizedBox(height: 14),
+            SecondaryButton(
+              label: 'Find runners',
+              icon: Icons.person_add_alt_1_rounded,
+              height: 44,
+              onPressed: _openFriends,
+            ),
+          ],
+        ),
+      );
+    }
+    return Column(children: _feed.map(_buildFeedTile).toList());
+  }
 
+  Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
       child: Row(
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            alignment: Alignment.center,
-            decoration: const BoxDecoration(
-              gradient: AppColors.brandGradient,
-              shape: BoxShape.circle,
-            ),
-            child: Text(initial, style: AppText.stat(18)),
-          ),
+          Avatar(name: _userName, size: 44),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -140,10 +248,9 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-          IconCircleButton(
-            icon: Icons.refresh_rounded,
-            onTap: _loadHomeData,
-          ),
+          AppIconButton(icon: Icons.search_rounded, onTap: _openSearch),
+          const SizedBox(width: 8),
+          AppIconButton(icon: Icons.refresh_rounded, onTap: _loadHomeData),
         ],
       ),
     );
@@ -156,97 +263,72 @@ class _HomePageState extends State<HomePage> {
     final heroText = _totalRuns == 0
         ? 'Start your first run today'
         : _territoryArea > 0
-            ? ''
-            : '$_totalRuns runs completed';
+        ? ''
+        : '$_totalRuns runs completed';
 
     final heroSubtext = _totalRuns == 0
         ? 'Complete your first run to start building your zone.'
         : _territoryArea > 0
-            ? 'You covered ${_totalDistanceKm.toStringAsFixed(2)} km and claimed territory.'
-            : 'You covered ${_totalDistanceKm.toStringAsFixed(2)} km overall.';
+        ? 'You covered ${_totalDistanceKm.toStringAsFixed(2)} km and claimed territory.'
+        : 'You covered ${_totalDistanceKm.toStringAsFixed(2)} km overall.';
 
-    return HeroCard(
-      padding: const EdgeInsets.fromLTRB(22, 22, 22, 24),
-      child: _isLoading
-          ? const SizedBox(
-              height: 96,
-              child: Center(
-                child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                    color: Colors.white,
-                    strokeWidth: 2.4,
-                  ),
-                ),
-              ),
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'YOUR TERRITORY',
-                  style: AppText.overline.copyWith(
-                    color: Colors.white.withValues(alpha: 0.75),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                if (hasArea)
-                  Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(text: area.value, style: AppText.stat(48)),
-                        TextSpan(
-                          text: ' ${area.unit}',
-                          style: AppText.stat(
-                            20,
-                            weight: FontWeight.w700,
+    return AppCard(
+      padding: const EdgeInsets.all(20),
+      child: SizedBox(
+        width: double.infinity,
+        child: _isLoading
+            ? const SizedBox(height: 96, child: Center(child: AppLoader()))
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('YOUR TERRITORY', style: AppText.overline),
+                  const SizedBox(height: 14),
+                  if (hasArea)
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: area.value,
+                            style: AppText.stat(
+                              44,
+                              weight: FontWeight.w600,
+                              color: AppColors.signature,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  Text(heroText, style: AppText.headline),
-                const SizedBox(height: 10),
-                Text(
-                  heroSubtext,
-                  style: AppText.body.copyWith(
-                    color: Colors.white.withValues(alpha: 0.88),
-                  ),
-                ),
-              ],
-            ),
+                          TextSpan(
+                            text: ' ${area.unit.toLowerCase()}',
+                            style: AppText.unit(18),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Text(heroText, style: AppText.headline),
+                  const SizedBox(height: 10),
+                  Text(heroSubtext, style: AppText.bodySecondary),
+                ],
+              ),
+      ),
     );
   }
 
   Widget _buildStatsCard() {
     return AppCard(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
-      child: Row(
+      child: StatRow(
         children: [
-          Expanded(
-            child: StatBlock(
-              value: _isLoading ? '--' : _totalDistanceKm.toStringAsFixed(2),
-              unit: 'KM',
-              label: 'Distance',
-            ),
+          StatBlock(
+            value: _isLoading ? '--' : _totalDistanceKm.toStringAsFixed(2),
+            unit: 'km',
+            label: 'Distance',
           ),
-          const StatDivider(),
-          Expanded(
-            child: StatBlock(
-              value: _isLoading ? '--' : _totalRuns.toString(),
-              label: 'Runs',
-            ),
+          StatBlock(
+            value: _isLoading ? '--' : _totalRuns.toString(),
+            label: 'Runs',
           ),
-          const StatDivider(),
-          Expanded(
-            child: StatBlock(
-              value: _isLoading ? '--' : _avgSpeed.toStringAsFixed(1),
-              unit: 'KM/H',
-              label: 'Avg speed',
-              accent: true,
-            ),
+          StatBlock(
+            value: _isLoading ? '--' : _avgSpeed.toStringAsFixed(1),
+            unit: 'km/h',
+            label: 'Avg speed',
           ),
         ],
       ),
@@ -257,36 +339,23 @@ class _HomePageState extends State<HomePage> {
     final missionProgress = _totalRuns == 0
         ? 0.0
         : _totalRuns >= 5
-            ? 1.0
-            : _totalRuns / 5.0;
+        ? 1.0
+        : _totalRuns / 5.0;
     final runsDone = _totalRuns >= 5 ? 5 : _totalRuns;
 
     return AppCard(
-      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: AppColors.pink.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: const Icon(
-                  Icons.flag_rounded,
-                  color: AppColors.pink,
-                  size: 18,
-                ),
+              Expanded(
+                child: Text('Secure Main Loop', style: AppText.headline),
               ),
-              const SizedBox(width: 10),
-              Expanded(child: Text('Secure Main Loop', style: AppText.subtitle)),
               Text('$runsDone/5 RUNS', style: AppText.overline),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Text(
             _totalRuns == 0
                 ? 'Complete your first run to activate your mission.'
@@ -294,7 +363,7 @@ class _HomePageState extends State<HomePage> {
             style: AppText.bodySecondary,
           ),
           const SizedBox(height: 14),
-          GradientProgressBar(value: missionProgress),
+          AppProgressBar(value: missionProgress),
         ],
       ),
     );
@@ -311,7 +380,7 @@ class _HomePageState extends State<HomePage> {
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _loadHomeData,
-                color: AppColors.pink,
+                color: AppColors.text,
                 backgroundColor: AppColors.surfaceHigh,
                 child: SingleChildScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
@@ -325,38 +394,23 @@ class _HomePageState extends State<HomePage> {
                           child: ErrorBanner(_error!),
                         ),
                       _buildHero(),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 12),
                       _buildStatsCard(),
                       const SizedBox(height: 26),
                       const SectionTitle('Today’s mission'),
                       const SizedBox(height: 12),
                       _buildMission(),
                       const SizedBox(height: 26),
-                      const SectionTitle('Recent activity'),
+                      SectionTitle(
+                        'Friends’ activity',
+                        trailing: AppIconButton(
+                          icon: Icons.group_rounded,
+                          size: 36,
+                          onTap: _openFriends,
+                        ),
+                      ),
                       const SizedBox(height: 12),
-                      buildActivityTile(
-                        icon: Icons.route_rounded,
-                        color: AppColors.pink,
-                        title: 'Total distance',
-                        subtitle:
-                            '${_totalDistanceKm.toStringAsFixed(2)} km covered so far',
-                        trailing: 'LIVE',
-                      ),
-                      buildActivityTile(
-                        icon: Icons.directions_run_rounded,
-                        color: AppColors.purple,
-                        title: 'Runs completed',
-                        subtitle: 'You have finished $_totalRuns runs',
-                        trailing: 'NOW',
-                      ),
-                      buildActivityTile(
-                        icon: Icons.speed_rounded,
-                        color: AppColors.gold,
-                        title: 'Average speed',
-                        subtitle:
-                            'Current average speed is ${_avgSpeed.toStringAsFixed(1)} km/h',
-                        trailing: 'STATS',
-                      ),
+                      _buildFeed(),
                     ],
                   ),
                 ),

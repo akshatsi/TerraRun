@@ -18,20 +18,16 @@ class AuthService {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
-      body: jsonEncode({
-        'email': email.trim(),
-        'password': password,
-      }),
+      body: jsonEncode({'email': email.trim(), 'password': password}),
     );
 
-    final dynamic data =
-        response.body.isNotEmpty ? jsonDecode(response.body) : {};
+    final dynamic data = response.body.isNotEmpty
+        ? jsonDecode(response.body)
+        : {};
 
     if (response.statusCode != 200) {
       throw Exception(
-        data is Map && data['detail'] != null
-            ? data['detail']
-            : 'Login failed',
+        data is Map && data['detail'] != null ? data['detail'] : 'Login failed',
       );
     }
 
@@ -62,8 +58,9 @@ class AuthService {
       }),
     );
 
-    final dynamic data =
-        response.body.isNotEmpty ? jsonDecode(response.body) : {};
+    final dynamic data = response.body.isNotEmpty
+        ? jsonDecode(response.body)
+        : {};
 
     if (response.statusCode != 200) {
       throw Exception(
@@ -93,9 +90,36 @@ class AuthService {
     await prefs.setString(_userEmailKey, userEmail);
   }
 
+  /// Stores a new display name after the user edits their profile.
+  static Future<void> saveUserName(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_userNameKey, name);
+  }
+
   static Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_tokenKey);
+  }
+
+  /// The signed-in user's id. Login returns none, but the token's `sub`
+  /// claim holds it, so read it from there (no verification needed here).
+  static Future<int?> getUserId() async {
+    final token = await getToken();
+    return userIdFromToken(token);
+  }
+
+  static int? userIdFromToken(String? token) {
+    if (token == null) return null;
+    final parts = token.split('.');
+    if (parts.length != 3) return null;
+    try {
+      final payload = jsonDecode(
+        utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
+      );
+      return int.tryParse('${payload['sub']}');
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<String?> getUserName() async {

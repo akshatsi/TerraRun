@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -302,9 +303,7 @@ class _RunPageState extends State<RunPage> {
         ? 'No connection. Your run is saved on this phone and will upload later.'
         : 'Failed to save run';
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showAppToast(context, message);
   }
 
   Future<void> resetRun() async {
@@ -336,14 +335,12 @@ class _RunPageState extends State<RunPage> {
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
       decoration: BoxDecoration(
-        color: AppColors.surface.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(detail == null ? 999 : 26),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(
-          color: tracking
-              ? AppColors.pink.withValues(alpha: 0.6)
-              : problem
-              ? AppColors.gold.withValues(alpha: 0.5)
-              : AppColors.border,
+          color: problem
+              ? AppColors.warning.withValues(alpha: 0.6)
+              : AppColors.line,
         ),
       ),
       child: Row(
@@ -352,10 +349,8 @@ class _RunPageState extends State<RunPage> {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: tracking
-                  ? AppColors.pink.withValues(alpha: 0.18)
-                  : Colors.white.withValues(alpha: 0.08),
-              shape: BoxShape.circle,
+              color: AppColors.surfaceHigh,
+              borderRadius: BorderRadius.circular(AppRadius.control),
             ),
             child: Icon(
               tracking
@@ -364,9 +359,9 @@ class _RunPageState extends State<RunPage> {
                   ? Icons.location_off_rounded
                   : Icons.location_searching,
               color: tracking
-                  ? AppColors.pink
+                  ? AppColors.positive
                   : problem
-                  ? AppColors.gold
+                  ? AppColors.warning
                   : AppColors.textSecondary,
               size: 18,
             ),
@@ -380,13 +375,11 @@ class _RunPageState extends State<RunPage> {
                   _bannerText,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: AppText.subtitle.copyWith(
-                    color: tracking ? AppColors.pink : Colors.white,
-                  ),
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w500),
                 ),
                 if (detail != null) ...[
                   const SizedBox(height: 2),
-                  Text(detail, style: AppText.caption.copyWith(height: 1.3)),
+                  Text(detail, style: AppText.caption),
                 ],
               ],
             ),
@@ -403,27 +396,16 @@ class _RunPageState extends State<RunPage> {
   }
 
   Widget buildBottomPanel() {
-    return Container(
+    return ShadCard(
+      width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        border: Border.all(color: AppColors.border),
-      ),
+      backgroundColor: AppColors.surface,
+      radius: const BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
       child: SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(20),
-              ),
-            ),
-            const SizedBox(height: 20),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -438,17 +420,17 @@ class _RunPageState extends State<RunPage> {
                   flex: 2,
                   child: StatBlock(
                     value: distanceKm.toStringAsFixed(2),
-                    unit: 'KM',
+                    unit: 'km',
                     label: 'Distance',
                     valueSize: 44,
-                    accent: true,
+                    hero: true,
                     align: CrossAxisAlignment.center,
                   ),
                 ),
                 Expanded(
                   child: StatBlock(
                     value: avgSpeed.toStringAsFixed(1),
-                    unit: 'KM/H',
+                    unit: 'km/h',
                     label: 'Avg speed',
                     valueSize: 20,
                     align: CrossAxisAlignment.end,
@@ -457,23 +439,27 @@ class _RunPageState extends State<RunPage> {
               ],
             ),
             const SizedBox(height: 22),
-            GradientButton(
-              label: isRunning ? 'Stop run' : 'Start run',
-              icon: isRunning ? Icons.stop_rounded : Icons.play_arrow_rounded,
-              gradient: isRunning
-                  ? AppColors.dangerGradient
-                  : AppColors.brandGradient,
-              loading: isSavingRun,
-              onPressed: isSavingRun ? null : (isRunning ? stopRun : startRun),
-            ),
+            if (isRunning)
+              DestructiveButton(
+                label: 'Stop run',
+                icon: Icons.stop_rounded,
+                loading: isSavingRun,
+                onPressed: isSavingRun ? null : stopRun,
+              )
+            else
+              SignatureButton(
+                label: 'Start run',
+                icon: Icons.play_arrow_rounded,
+                loading: isSavingRun,
+                onPressed: isSavingRun ? null : startRun,
+              ),
             if (!isRunning && !isSavingRun) ...[
               const SizedBox(height: 6),
-              TextButton(
+              ShadButton.ghost(
                 onPressed: resetRun,
-                child: Text(
-                  'Reset',
-                  style: AppText.caption.copyWith(fontWeight: FontWeight.w700),
-                ),
+                foregroundColor: AppColors.textSecondary,
+                textStyle: AppText.label,
+                child: const Text('Reset'),
               ),
             ],
           ],
@@ -525,8 +511,8 @@ class _RunPageState extends State<RunPage> {
                   for (final line in _routeLines)
                     Polyline(
                       points: line,
-                      strokeWidth: 5,
-                      color: AppColors.pink,
+                      strokeWidth: 4,
+                      color: AppColors.mine,
                     ),
                 ],
               ),
@@ -539,15 +525,9 @@ class _RunPageState extends State<RunPage> {
                       height: 28,
                       child: Container(
                         decoration: BoxDecoration(
-                          color: AppColors.pink,
+                          color: AppColors.text,
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 3),
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppColors.pink.withValues(alpha: 0.55),
-                              blurRadius: 14,
-                            ),
-                          ],
+                          border: Border.all(color: AppColors.bg, width: 4),
                         ),
                       ),
                     ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'screens/login_page.dart';
 import 'screens/main_navigation.dart';
 import 'services/auth_service.dart';
@@ -14,11 +15,22 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'TerraRun',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark(),
-      home: const AppStartPage(),
+    // ShadApp.custom hosts a MaterialApp, so shadcn components and the Material
+    // widgets that have no shadcn version (maps, pull to refresh, page views)
+    // share one dark theme.
+    return ShadApp.custom(
+      themeMode: ThemeMode.dark,
+      darkTheme: AppShadTheme.dark(),
+      appBuilder: (context) {
+        return MaterialApp(
+          title: 'TerraRun',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.dark(),
+          localizationsDelegates: const [GlobalShadLocalizations.delegate],
+          builder: (context, child) => ShadAppBuilder(child: child!),
+          home: const AppStartPage(),
+        );
+      },
     );
   }
 }
@@ -62,11 +74,7 @@ class _AppStartPageState extends State<AppStartPage> {
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: [
-            Wordmark(size: 22),
-            SizedBox(height: 28),
-            AppLoader(),
-          ],
+          children: [Wordmark(size: 22), SizedBox(height: 28), AppLoader()],
         ),
       ),
     );

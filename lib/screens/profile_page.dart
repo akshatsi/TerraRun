@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
-import 'location_test_page.dart';
-import 'run_history_page.dart';
+import 'package:share_plus/share_plus.dart';
+import 'edit_profile_page.dart';
 import '../services/auth_service.dart';
+import '../services/social_service.dart';
 import '../services/stats_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/run_history_tile.dart';
 import 'login_page.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -38,12 +40,17 @@ class _ProfilePageState extends State<ProfilePage> {
 
   String _userName = 'Runner';
   String? _userEmail;
+  String _bio = '';
+  int? _followers;
+  int? _following;
+  double _territorySqM = 0.0;
 
   double _totalDistanceKm = 0.0;
   int _totalRuns = 0;
   double _avgSpeed = 0.0;
 
   Map<String, int> _runsPerDay = {};
+  List<dynamic> _runs = [];
   List<double> _weeklyDistances = List.filled(7, 0.0);
 
   @override
@@ -62,10 +69,20 @@ class _ProfilePageState extends State<ProfilePage> {
     final userEmail = await AuthService.getUserEmail();
     final statsResult = await StatsService.getProfileStats();
     final runsResult = await StatsService.getAllRuns();
+    final cardResult = await SocialService.getMyCard();
 
     if (!mounted) return;
 
-    final name = (userName == null || userName.isEmpty) ? 'Runner' : userName;
+    final card = cardResult['success'] == true && cardResult['data'] is Map
+        ? cardResult['data'] as Map
+        : null;
+    final cardName = card?['name']?.toString();
+
+    final name = (cardName != null && cardName.isNotEmpty)
+        ? cardName
+        : (userName == null || userName.isEmpty)
+        ? 'Runner'
+        : userName;
 
     if (statsResult['success'] == true && runsResult['success'] == true) {
       final stats = statsResult['data'] as Map<String, dynamic>;
@@ -93,23 +110,34 @@ class _ProfilePageState extends State<ProfilePage> {
 
         runsPerDay[dateKey] = (runsPerDay[dateKey] ?? 0) + 1;
 
-        final difference = now.difference(
-          DateTime(createdAt.year, createdAt.month, createdAt.day),
-        ).inDays;
+        final difference = now
+            .difference(
+              DateTime(createdAt.year, createdAt.month, createdAt.day),
+            )
+            .inDays;
 
         if (difference >= 0 && difference < 7) {
           final index = 6 - difference;
-          weeklyDistances[index] += ((run['distance_km'] ?? 0) as num).toDouble();
+          weeklyDistances[index] += ((run['distance_km'] ?? 0) as num)
+              .toDouble();
         }
       }
 
       setState(() {
         _userName = name;
         _userEmail = userEmail;
+        _bio = card?['bio']?.toString() ?? '';
+        _followers = (card?['followers_count'] as num?)?.toInt();
+        _following = (card?['following_count'] as num?)?.toInt();
+        _territorySqM =
+            ((card?['territory_area_sq_m'] ?? stats['territory_area_sq_m'] ?? 0)
+                    as num)
+                .toDouble();
         _totalDistanceKm = (stats['total_distance_km'] ?? 0).toDouble();
         _totalRuns = (stats['total_runs'] ?? 0) as int;
         _avgSpeed = (stats['avg_speed'] ?? 0).toDouble();
         _runsPerDay = runsPerDay;
+        _runs = runs;
         _weeklyDistances = weeklyDistances;
         _isLoading = false;
       });
@@ -117,7 +145,8 @@ class _ProfilePageState extends State<ProfilePage> {
       setState(() {
         _userName = name;
         _userEmail = userEmail;
-        _error = statsResult['message']?.toString() ??
+        _error =
+            statsResult['message']?.toString() ??
             runsResult['message']?.toString() ??
             'Failed to load profile data';
         _isLoading = false;
@@ -126,20 +155,9 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildIdentity() {
-    final initial = _userName.isNotEmpty ? _userName[0].toUpperCase() : 'R';
-
     return Row(
       children: [
-        Container(
-          width: 64,
-          height: 64,
-          alignment: Alignment.center,
-          decoration: const BoxDecoration(
-            gradient: AppColors.territoryGradient,
-            shape: BoxShape.circle,
-          ),
-          child: Text(initial, style: AppText.stat(26)),
-        ),
+        Avatar(name: _userName, size: 64),
         const SizedBox(width: 16),
         Expanded(
           child: Column(
@@ -149,7 +167,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 _userName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: AppText.headline,
+                style: AppText.title,
               ),
               if (_userEmail != null && _userEmail!.isNotEmpty) ...[
                 const SizedBox(height: 4),
@@ -160,7 +178,55 @@ class _ProfilePageState extends State<ProfilePage> {
                   style: AppText.bodySecondary,
                 ),
               ],
+              if (_followers != null && _following != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  '$_followers ${_followers == 1 ? 'follower' : 'followers'}'
+                  ' · $_following following',
+                  style: AppText.label,
+                ),
+              ],
             ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _editProfile() async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => EditProfilePage(name: _userName, bio: _bio),
+      ),
+    );
+    if (saved == true && mounted) _loadProfileData();
+  }
+
+  Future<void> _shareProfile() async {
+    final text = Fmt.shareText(
+      name: _userName,
+      distanceKm: _totalDistanceKm,
+      territorySqM: _territorySqM,
+    );
+    await SharePlus.instance.share(ShareParams(text: text));
+  }
+
+  Widget _buildActions() {
+    return Row(
+      children: [
+        Expanded(
+          child: SecondaryButton(
+            label: 'Edit profile',
+            height: 44,
+            onPressed: _editProfile,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: SecondaryButton(
+            label: 'Share profile',
+            height: 44,
+            onPressed: _shareProfile,
           ),
         ),
       ],
@@ -169,31 +235,19 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildStatsCard() {
     return AppCard(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
-      child: Row(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      child: StatRow(
         children: [
-          Expanded(
-            child: StatBlock(
-              value: _totalDistanceKm.toStringAsFixed(2),
-              unit: 'KM',
-              label: 'Distance',
-            ),
+          StatBlock(
+            value: _totalDistanceKm.toStringAsFixed(2),
+            unit: 'km',
+            label: 'Distance',
           ),
-          const StatDivider(),
-          Expanded(
-            child: StatBlock(
-              value: _totalRuns.toString(),
-              label: 'Runs',
-            ),
-          ),
-          const StatDivider(),
-          Expanded(
-            child: StatBlock(
-              value: _avgSpeed.toStringAsFixed(1),
-              unit: 'KM/H',
-              label: 'Avg speed',
-              accent: true,
-            ),
+          StatBlock(value: _totalRuns.toString(), label: 'Runs'),
+          StatBlock(
+            value: _avgSpeed.toStringAsFixed(1),
+            unit: 'km/h',
+            label: 'Avg speed',
           ),
         ],
       ),
@@ -230,9 +284,8 @@ class _ProfilePageState extends State<ProfilePage> {
                       labels[i],
                       maxLines: 1,
                       style: AppText.caption.copyWith(
-                        fontSize: 10,
-                        color: i == 6 ? AppColors.pink : AppColors.textMuted,
-                        fontWeight: i == 6 ? FontWeight.w700 : FontWeight.w600,
+                        color: i == 6 ? AppColors.text : AppColors.textMuted,
+                        fontWeight: i == 6 ? FontWeight.w500 : FontWeight.w400,
                       ),
                     ),
                   ),
@@ -253,23 +306,21 @@ class _ProfilePageState extends State<ProfilePage> {
       height: 36,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        gradient: isToday || hasRun ? AppColors.brandGradient : null,
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: isToday
-              ? Colors.white
-              : hasRun
-                  ? Colors.transparent
-                  : AppColors.border,
-          width: isToday ? 1.6 : 1,
-        ),
+        color: hasRun ? AppColors.text : Colors.transparent,
+        borderRadius: BorderRadius.circular(AppRadius.chip),
+        border: isToday && !hasRun
+            ? Border.all(color: AppColors.textSecondary)
+            : null,
       ),
       child: Text(
         '$day',
         style: AppText.caption.copyWith(
-          fontSize: 12,
-          color: isToday || hasRun ? Colors.white : AppColors.textSecondary,
-          fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
+          color: hasRun
+              ? AppColors.onLight
+              : isToday
+              ? AppColors.text
+              : AppColors.textSecondary,
+          fontWeight: hasRun || isToday ? FontWeight.w500 : FontWeight.w400,
         ),
       ),
     );
@@ -287,7 +338,10 @@ class _ProfilePageState extends State<ProfilePage> {
       if (day < 1 || day > daysInMonth) {
         return const SizedBox(width: 36, height: 36);
       }
-      return buildCalendarDay(day, Fmt.dateKey(DateTime(now.year, now.month, day)));
+      return buildCalendarDay(
+        day,
+        Fmt.dateKey(DateTime(now.year, now.month, day)),
+      );
     });
 
     return AppCard(
@@ -323,7 +377,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
     return RefreshIndicator(
       onRefresh: _loadProfileData,
-      color: AppColors.pink,
+      color: AppColors.text,
       backgroundColor: AppColors.surfaceHigh,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -332,6 +386,12 @@ class _ProfilePageState extends State<ProfilePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildIdentity(),
+            if (_bio.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(_bio, style: AppText.body),
+            ],
+            const SizedBox(height: 18),
+            _buildActions(),
             const SizedBox(height: 24),
             if (_isLoading)
               const Padding(
@@ -355,26 +415,18 @@ class _ProfilePageState extends State<ProfilePage> {
               _buildCalendar(),
             ],
             const SizedBox(height: 26),
-            MenuTile(
-              icon: Icons.history_rounded,
-              title: 'Run history',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const RunHistoryPage()),
-                );
-              },
-            ),
-            MenuTile(
-              icon: Icons.location_on_rounded,
-              title: 'Location access',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LocationTestPage()),
-                );
-              },
-            ),
+            if (!_isLoading && _error == null) ...[
+              const SectionTitle('Run history'),
+              const SizedBox(height: 4),
+              if (_runs.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Text('No runs yet.', style: AppText.bodySecondary),
+                )
+              else
+                for (final run in _runs) RunHistoryTile(run: run),
+              const SizedBox(height: 26),
+            ],
             MenuTile(
               icon: Icons.logout_rounded,
               title: 'Log out',
@@ -391,6 +443,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 );
               },
             ),
+            const AppDivider(),
           ],
         ),
       ),
@@ -406,8 +459,8 @@ class _ProfilePageState extends State<ProfilePage> {
           children: [
             ScreenHeader(
               title: 'Profile',
-              leading: const IconCircleButton(icon: Icons.person_outline_rounded),
-              trailing: IconCircleButton(
+              leading: const AppIconButton(icon: Icons.person_outline_rounded),
+              trailing: AppIconButton(
                 icon: Icons.refresh_rounded,
                 onTap: _loadProfileData,
               ),
@@ -420,6 +473,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 }
 
+/// Bar chart of distance per day.
 class ProgressGraphPainter extends CustomPainter {
   final List<double> weeklyDistances;
 
@@ -432,70 +486,30 @@ class ProgressGraphPainter extends CustomPainter {
     final maxRaw = weeklyDistances.reduce((a, b) => a > b ? a : b);
     final maxValue = maxRaw == 0 ? 1.0 : maxRaw;
 
-    // Faint guide lines.
-    final guide = Paint()
-      ..color = Colors.white.withValues(alpha: 0.08)
-      ..strokeWidth = 1;
-    for (int i = 0; i < 3; i++) {
-      final y = size.height * (0.15 + i * 0.35);
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), guide);
-    }
-
-    // One point per day, centred in its column so labels line up.
+    // One bar per day, centred in its column so labels line up.
     final slot = size.width / weeklyDistances.length;
-    final List<Offset> points = [];
+    final barWidth = slot * 0.46;
+    final last = weeklyDistances.length - 1;
 
     for (int i = 0; i < weeklyDistances.length; i++) {
-      final x = slot * (i + 0.5);
-      final normalized = weeklyDistances[i] / maxValue;
-      final y = size.height * (0.85 - (normalized * 0.65));
-      points.add(Offset(x, y));
+      final height = (size.height * weeklyDistances[i] / maxValue).clamp(
+        2.0,
+        size.height,
+      );
+      final left = slot * (i + 0.5) - barWidth / 2;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(left, size.height - height, barWidth, height),
+          const Radius.circular(3),
+        ),
+        Paint()
+          ..color = i == last
+              ? AppColors.text
+              : weeklyDistances[i] > 0
+              ? AppColors.textSecondary
+              : AppColors.line,
+      );
     }
-
-    final line = Path()..moveTo(points.first.dx, points.first.dy);
-    for (int i = 1; i < points.length; i++) {
-      line.lineTo(points[i].dx, points[i].dy);
-    }
-
-    final fill = Path.from(line)
-      ..lineTo(points.last.dx, size.height)
-      ..lineTo(points.first.dx, size.height)
-      ..close();
-
-    canvas.drawPath(
-      fill,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            AppColors.pink.withValues(alpha: 0.3),
-            AppColors.pink.withValues(alpha: 0.0),
-          ],
-        ).createShader(Offset.zero & size),
-    );
-
-    canvas.drawPath(
-      line,
-      Paint()
-        ..color = AppColors.pink
-        ..strokeWidth = 2.5
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
-
-    final dotPaint = Paint()..color = AppColors.pink;
-    for (int i = 0; i < points.length - 1; i++) {
-      canvas.drawCircle(points[i], 3.5, dotPaint);
-    }
-
-    canvas.drawCircle(
-      points.last,
-      10,
-      Paint()..color = AppColors.pink.withValues(alpha: 0.25),
-    );
-    canvas.drawCircle(points.last, 5.5, dotPaint);
   }
 
   @override

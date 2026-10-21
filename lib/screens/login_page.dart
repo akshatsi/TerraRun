@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import 'login_form_page.dart';
@@ -19,38 +20,22 @@ class _LoginPageState extends State<LoginPage> {
 
   static const List<OnboardingData> pages = [
     OnboardingData(
-      headline: [
-        HeadlineSpan('Own your '),
-        HeadlineSpan('streets', emphasis: true, italic: true),
-        HeadlineSpan('.'),
-      ],
+      headline: 'Own your streets.',
       subtitle: 'Run a loop and the ground inside it becomes yours.',
       backgroundImage: 'assets/onboarding/bg1.jpg',
     ),
     OnboardingData(
-      headline: [
-        HeadlineSpan('Close '),
-        HeadlineSpan('loops', emphasis: true, italic: true),
-        HeadlineSpan(' that never run out.'),
-      ],
+      headline: 'Close loops that never run out.',
       subtitle: 'Every route you close adds to your territory.',
       backgroundImage: 'assets/onboarding/bg2.jpg',
     ),
     OnboardingData(
-      headline: [
-        HeadlineSpan('Get motivation from '),
-        HeadlineSpan('your people', emphasis: true, italic: true),
-        HeadlineSpan('.'),
-      ],
+      headline: 'Get motivation from your people.',
       subtitle: 'Climb the leaderboard and watch rivals chase your streets.',
       backgroundImage: 'assets/onboarding/bg3.jpg',
     ),
     OnboardingData(
-      headline: [
-        HeadlineSpan('Run your '),
-        HeadlineSpan('world', emphasis: true, italic: true),
-        HeadlineSpan('.'),
-      ],
+      headline: 'Run your world.',
       subtitle: 'Your crew against the world.',
       backgroundImage: 'assets/onboarding/bg4.jpg',
     ),
@@ -86,7 +71,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
-    final imageHeight = media.size.height * 0.74;
+    final imageHeight = media.size.height * 0.58;
     final controlsHeight = 176 + media.padding.bottom;
 
     return Scaffold(
@@ -139,31 +124,29 @@ class _LoginPageState extends State<LoginPage> {
                         (dotIndex) => AnimatedContainer(
                           duration: const Duration(milliseconds: 260),
                           margin: const EdgeInsets.symmetric(horizontal: 3),
-                          width: currentIndex == dotIndex ? 22 : 8,
-                          height: 8,
+                          width: currentIndex == dotIndex ? 20 : 8,
+                          height: 4,
                           decoration: BoxDecoration(
                             color: currentIndex == dotIndex
-                                ? AppColors.pink
-                                : Colors.white.withValues(alpha: 0.25),
-                            borderRadius: BorderRadius.circular(20),
+                                ? AppColors.text
+                                : AppColors.line,
+                            borderRadius: BorderRadius.circular(4),
                           ),
                         ),
                       ),
                     ),
                     const SizedBox(height: 22),
-                    GradientButton(
+                    PrimaryButton(
                       label: 'Join for free',
                       onPressed: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (_) => const SignupPage(),
-                          ),
+                          MaterialPageRoute(builder: (_) => const SignupPage()),
                         );
                       },
                     ),
                     const SizedBox(height: 8),
-                    TextButton(
+                    ShadButton.ghost(
                       onPressed: () {
                         Navigator.push(
                           context,
@@ -172,12 +155,11 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                         );
                       },
-                      child: Text(
-                        'Log in',
-                        style: AppText.button.copyWith(
-                          color: AppColors.textSecondary,
-                        ),
+                      foregroundColor: AppColors.textSecondary,
+                      textStyle: AppText.button.copyWith(
+                        fontWeight: FontWeight.w500,
                       ),
+                      child: const Text('Log in'),
                     ),
                   ],
                 ),
@@ -191,7 +173,7 @@ class _LoginPageState extends State<LoginPage> {
 }
 
 class OnboardingData {
-  final List<HeadlineSpan> headline;
+  final String headline;
   final String subtitle;
   final String backgroundImage;
 
@@ -233,21 +215,8 @@ class _Slide extends StatelessWidget {
                   return Container(color: AppColors.surface);
                 },
               ),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    stops: const [0.0, 0.45, 0.8, 1.0],
-                    colors: [
-                      AppColors.bg.withValues(alpha: 0.55),
-                      AppColors.deepPurple.withValues(alpha: 0.28),
-                      AppColors.bg.withValues(alpha: 0.9),
-                      AppColors.bg,
-                    ],
-                  ),
-                ),
-              ),
+              // Plain dark scrim so the photo stays legible.
+              ColoredBox(color: AppColors.bg.withValues(alpha: 0.5)),
             ],
           ),
         ),
@@ -259,7 +228,7 @@ class _Slide extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Headline(data.headline, style: AppText.display),
+              Text(data.headline, style: AppText.display),
               const SizedBox(height: 12),
               Text(
                 data.subtitle,

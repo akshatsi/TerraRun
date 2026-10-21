@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'auth_service.dart';
 import '../config.dart';
+import '../models/run_detail.dart';
 import '../utils/format.dart';
 
 class RunService {
@@ -141,4 +142,52 @@ class RunService {
       return {'success': false, 'message': 'Fetch runs error: $e'};
     }
   }
+
+  /// One run in full, for any runner. On success `data` is a [RunDetail].
+  static Future<Map<String, dynamic>> getRunDetail(int id) async {
+    try {
+      final token = await AuthService.getToken();
+      if (token == null || token.isEmpty) {
+        return {
+          'success': false,
+          'message': 'No auth token found. Please log in again.',
+        };
+      }
+
+      final response = await (client ?? http.Client())
+          .get(
+            Uri.parse('${Config.baseUrl}/runs/$id'),
+            headers: {
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      dynamic data;
+      try {
+        data = response.body.isNotEmpty ? jsonDecode(response.body) : null;
+      } catch (_) {
+        data = null;
+      }
+
+      if (response.statusCode == 200 && data is Map) {
+        return {
+          'success': true,
+          'data': RunDetail.fromJson(Map<String, dynamic>.from(data)),
+        };
+      }
+      return {
+        'success': false,
+        'message': data is Map && data['detail'] != null
+            ? data['detail'].toString()
+            : 'Failed to load run',
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Load run error: $e'};
+    }
+  }
+
+  /// Replaces the HTTP client; tests set this.
+  static http.Client? client;
 }

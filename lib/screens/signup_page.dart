@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'login_form_page.dart';
 import 'main_navigation.dart';
 import '../services/auth_service.dart';
@@ -64,8 +65,11 @@ class _SignupPageState extends State<SignupPage> {
   }
 
   Widget _visibilityToggle(bool obscured, VoidCallback onTap) {
-    return IconButton(
+    return ShadIconButton.ghost(
       onPressed: onTap,
+      width: 32,
+      height: 32,
+      padding: EdgeInsets.zero,
       icon: Icon(
         obscured ? Icons.visibility_off_rounded : Icons.visibility_rounded,
         color: AppColors.textMuted,
@@ -121,7 +125,7 @@ class _SignupPageState extends State<SignupPage> {
           children: [
             ScreenHeader(
               title: 'Sign up',
-              leading: IconCircleButton(
+              leading: AppIconButton(
                 icon: Icons.arrow_back_rounded,
                 onTap: () => Navigator.pop(context),
               ),
@@ -134,13 +138,7 @@ class _SignupPageState extends State<SignupPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Headline(
-                        [
-                          HeadlineSpan('Create your '),
-                          HeadlineSpan('account', emphasis: true, italic: true),
-                          HeadlineSpan('.'),
-                        ],
-                      ),
+                      Text('Create your account.', style: AppText.title),
                       const SizedBox(height: 8),
                       Text(
                         'Start tracking runs and building your territory.',
@@ -192,7 +190,7 @@ class _SignupPageState extends State<SignupPage> {
                         ErrorBanner(_serverError!),
                         const SizedBox(height: 20),
                       ],
-                      GradientButton(
+                      PrimaryButton(
                         label: 'Create account',
                         loading: _isLoading,
                         onPressed: _isLoading ? null : _signup,
@@ -217,8 +215,8 @@ class _SignupPageState extends State<SignupPage> {
                             child: Text(
                               'Log in',
                               style: AppText.bodySecondary.copyWith(
-                                color: AppColors.pink,
-                                fontWeight: FontWeight.w700,
+                                color: AppColors.text,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
                           ),
