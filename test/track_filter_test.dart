@@ -155,11 +155,31 @@ void loopTests() {
     expect(f.isLoopClosed, isTrue);
   });
 
-  test('square ending 30 m from the start is not closed', () {
+  test('square ending 30 m from the start is a closed loop', () {
     final f = _squareRun(60, 30);
     expect(f.startDistanceM, closeTo(30, 1));
+    expect(f.isLoopClosed, isTrue);
+  });
+
+  test('big square ending 150 m from the start is a closed loop', () {
+    final f = _squareRun(300, 150);
+    expect(f.startDistanceM, closeTo(150, 2));
+    expect(f.isLoopClosed, isTrue);
+  });
+
+  test('ending 210 m from the start is not closed', () {
+    final f = _squareRun(300, 210);
+    expect(f.startDistanceM, closeTo(210, 2));
     expect(f.isLoopClosed, isFalse);
     expect(f.loopLongEnough, isTrue);
+  });
+
+  test('a join longer than a quarter of the path is not closed', () {
+    final f = _squareRun(60, 59);
+    // Inside the 200 m radius, but more than 25% of the ~180 m path.
+    expect(f.startDistanceM!, greaterThan(0.25 * f.distanceM));
+    expect(f.startDistanceM!, lessThan(200));
+    expect(f.isLoopClosed, isFalse);
   });
 
   test('an 80 m path ending at the start is too short', () {

@@ -150,15 +150,34 @@ degrees.
 
 ## 4. Territory rules (v2)
 
-A run earns one of two shapes, decided by `build_territory_shape` in
+A run earns one of three shapes, decided by `build_territory_shape` in
 `backend/app/gps/territory_shape.py` (pure Python, no database):
 
-- **Loop** — the last accepted fix is within `closure_radius_m` (20 m) of the
-  first accepted fix, the path is at least `min_loop_perimeter_m` (100 m) long,
-  and gaps make up at most `max_gap_fraction_for_loop` (10%) of the loop's
-  length. The award is **only the enclosed area**: the closed ring, with
-  self-crossings resolved, and no corridor around it. An enclosed area under
-  `min_loop_area_sq_m` (200 m²), as in an out-and-back run, is treated as a route.
+- **Loop** — the path encloses at least `min_loop_area_sq_m` (200 m²). The
+  award is the enclosed area plus a route strip along any tails or spurs
+  outside it; the loop's own edge gets no corridor. Land is enclosed when:
+  - **the end is near the start.** A straight line joins the last accepted fix
+    to the first when they are within `closure_radius_m` (200 m), the path is
+    at least `min_loop_perimeter_m` (100 m), gaps are at most
+    `max_gap_fraction_for_loop` (10%) of it, and the join is at most
+    `max_closure_fraction` (25%) of the path, so at least 80% of the ring was
+    walked. Gaps are bridged only when this join is made.
+  - **the path crosses itself**, anywhere in the run: every face the path walls
+    off counts, so a loop with a tail before or after it, a figure-8 or a loop
+    run twice all earn the area inside, counted once.
+  - **the path comes back near itself.** GPS rarely crosses exactly, so a
+    return within `self_snap_m` (15 m, about twice a good fix's accuracy) of a
+    part of the path at least `self_snap_min_separation_m` (100 m) back along
+    it is joined by a short connector.
+
+  The join and the connectors are guesses, so a face that needs one counts only
+  if it is wider than 30 m somewhere (holds a disc of radius `self_snap_m`).
+  Two legs of an out-and-back 15 m apart earn nothing; a straight or gently
+  curving path never comes back near itself. All faces then lose any part
+  narrower than the 6 m route strip, and each part needs a perimeter of at
+  least 100 m. Under 200 m² in all, the run is a route. `reason` says what
+  happened, for example "Loop closed 25 m from start; 18,400 m² enclosed" or
+  "Path crossed itself; 10,000 m² enclosed + 211 m of route".
 - **Route** — any other run (A to B). The award is the road travelled: a thin
   strip `route_half_width_m` (3 m) each side of each accepted segment, with
   flat ends (no round caps) and never across a gap.
@@ -180,9 +199,10 @@ shape.closure_distance_m  # metres from last to first accepted fix; None if < 2 
 shape.reason              # short human-readable explanation
 ```
 
-`ShapeConfig` defaults: `closure_radius_m=20`, `min_loop_perimeter_m=100`,
-`min_loop_area_sq_m=200`, `route_half_width_m=3`, `max_gap_fraction_for_loop=0.1`,
-`simplify_tolerance_m=1.5`.
+`ShapeConfig` defaults: `closure_radius_m=200`, `max_closure_fraction=0.25`,
+`min_loop_perimeter_m=100`, `min_loop_area_sq_m=200`, `route_half_width_m=3`,
+`max_gap_fraction_for_loop=0.1`, `simplify_tolerance_m=1.5`, `self_snap_m=15`,
+`self_snap_min_separation_m=100`.
 
 The database side (`backend/app/territory.py`) applies the quality and
 distance rules, then subtracts the awarded shape from rivals and unions it

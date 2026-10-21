@@ -13,10 +13,13 @@ class TrackConfig {
   final double longGapS;
 
   /// A run that ends within this distance of its start, after at least
-  /// [minLoopPerimeterM] of path, is a loop. Both mirror the server's
-  /// `ShapeConfig` (`closure_radius_m`, `min_loop_perimeter_m`).
+  /// [minLoopPerimeterM] of path, and whose end-to-start gap is at most
+  /// [maxClosureFraction] of the path, is a loop. These mirror the server's
+  /// `ShapeConfig` (`closure_radius_m`, `min_loop_perimeter_m`,
+  /// `max_closure_fraction`).
   final double closureRadiusM;
   final double minLoopPerimeterM;
+  final double maxClosureFraction;
 
   /// Phone only: how near the start a runner must be to see the loop hint.
   final double loopHintRadiusM;
@@ -29,9 +32,10 @@ class TrackConfig {
     this.stationarySpeedMps = 0.5,
     this.maxSpeedMps = 12.0,
     this.longGapS = 15,
-    this.closureRadiusM = 20,
+    this.closureRadiusM = 200,
     this.minLoopPerimeterM = 100,
-    this.loopHintRadiusM = 50,
+    this.maxClosureFraction = 0.25,
+    this.loopHintRadiusM = 300,
   });
 }
 
@@ -113,11 +117,17 @@ class TrackFilter {
   /// The path is long enough for a loop, whether or not it has closed.
   bool get loopLongEnough => distanceM >= config.minLoopPerimeterM;
 
-  /// Same test as the server: back within the closure radius of the start
-  /// after enough path. Gaps do not count toward the path.
+  /// Same test as the server's start-to-end join: back within the closure
+  /// radius of the start, after enough path, with the join a small part of
+  /// the loop. Gaps do not count toward the path. (The server also counts
+  /// loops where the path crosses or nearly meets itself; the phone only
+  /// hints at the start-to-end case.)
   bool get isLoopClosed {
     final d = startDistanceM;
-    return d != null && loopLongEnough && d <= config.closureRadiusM;
+    return d != null &&
+        loopLongEnough &&
+        d <= config.closureRadiusM &&
+        d <= config.maxClosureFraction * distanceM;
   }
 
   /// Accepted fixes, one list per segment. Draw one line per list so no line
