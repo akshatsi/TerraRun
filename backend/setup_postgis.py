@@ -17,7 +17,7 @@ from app.database import engine, Base
 
 # Import all models so Base.metadata knows about them
 import app.models  # noqa: F401
-from app.models import RUN_ADDED_COLUMNS
+from app.models import RUN_ADDED_COLUMNS, USER_ADDED_COLUMNS
 
 
 def setup_database(bind=engine) -> None:
@@ -29,8 +29,11 @@ def setup_database(bind=engine) -> None:
     Base.metadata.create_all(bind=bind)
 
     with bind.begin() as conn:
-        for name, sql_type in RUN_ADDED_COLUMNS:
-            conn.execute(text(f"ALTER TABLE runs ADD COLUMN IF NOT EXISTS {name} {sql_type};"))
+        for table, columns in (("runs", RUN_ADDED_COLUMNS), ("users", USER_ADDED_COLUMNS)):
+            for name, sql_type in columns:
+                conn.execute(text(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {sql_type};"
+                ))
         # Same name as the constraint create_all makes on a fresh database,
         # so this is a no-op there. NULL client_run_id values never collide.
         conn.execute(text(

@@ -1,7 +1,7 @@
 import math
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
 class SignupRequest(BaseModel):
@@ -128,3 +128,106 @@ class TerritoryResponse(BaseModel):
 
 class TerritoryListResponse(BaseModel):
     territories: list[TerritoryResponse]
+
+
+# ---------------------------------------------------------------------------
+# Social: following, feed (see docs/social.md)
+# ---------------------------------------------------------------------------
+
+class UserCard(BaseModel):
+    id: int
+    name: str
+    total_distance_km: float = 0.0
+    total_runs: int = 0
+    territory_area_sq_m: float = 0.0
+    followers_count: int = 0
+    following_count: int = 0
+    is_following: bool = False
+    follows_you: bool = False
+    bio: Optional[str] = None
+
+
+class FeedUser(BaseModel):
+    id: int
+    name: str
+
+
+class RunSummary(BaseModel):
+    run_id: int
+    created_at: datetime
+    distance_km: float
+    duration_seconds: int
+    avg_speed: float
+    territory_kind: Optional[str] = None
+    awarded_area_sq_m: float = 0.0
+    route_geojson: Optional[dict] = None
+
+
+class FeedItem(RunSummary):
+    user: FeedUser
+
+
+class UserDetail(UserCard):
+    recent_runs: list[RunSummary] = []
+
+
+# ---------------------------------------------------------------------------
+# Run detail and profile editing (see docs/social.md, v2)
+# ---------------------------------------------------------------------------
+
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    bio: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if not 2 <= len(v) <= 40:
+            raise ValueError("name must be 2 to 40 characters")
+        return v
+
+    @field_validator("bio")
+    @classmethod
+    def _bio(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 160:
+            raise ValueError("bio must be at most 160 characters")
+        return v or None
+
+
+class SplitOut(BaseModel):
+    km: int
+    distance_m: float
+    duration_s: float
+    pace_s_per_km: int
+    elevation_change_m: Optional[float] = None
+
+
+class RunDetailTerritory(BaseModel):
+    kind: str = "none"
+    awarded_area_sq_m: float = 0.0
+    reason: str = ""
+
+
+class RunDetail(BaseModel):
+    run_id: int
+    created_at: datetime
+    user: FeedUser
+    is_mine: bool
+    distance_km: float
+    duration_seconds: int
+    moving_time_s: Optional[float] = None
+    avg_speed_kmh: float = 0.0
+    avg_pace_s_per_km: Optional[int] = None
+    elevation_gain_m: Optional[float] = None
+    max_speed_kmh: Optional[float] = None
+    quality: Optional[str] = None
+    territory: RunDetailTerritory
+    route_geojson: Optional[dict] = None
+    awarded_geojson: Optional[dict] = None
+    splits: list[SplitOut] = []

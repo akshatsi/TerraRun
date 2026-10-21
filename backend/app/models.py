@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Float, ForeignKey, DateTime, Boolean, BigInteger,
-    UniqueConstraint, Text,
+    UniqueConstraint, Text, CheckConstraint, Index,
 )
 from sqlalchemy.sql import func
 from geoalchemy2 import Geometry
@@ -14,6 +14,13 @@ class User(Base):
     name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
+    bio = Column(Text, nullable=True)
+
+
+# Columns added to users after the first release, same mechanism as below.
+USER_ADDED_COLUMNS = [
+    ("bio", "TEXT"),
+]
 
 
 # Columns added after the first release. setup_postgis.py adds each one to an
@@ -128,3 +135,21 @@ class Territory(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+
+
+class Follow(Base):
+    """One-way follow: follower_id follows followee_id."""
+    __tablename__ = "follows"
+    __table_args__ = (
+        CheckConstraint("follower_id <> followee_id", name="ck_follows_not_self"),
+        Index("ix_follows_followee_id", "followee_id"),
+    )
+
+    follower_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    followee_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

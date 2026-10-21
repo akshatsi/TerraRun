@@ -1,46 +1,38 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from geoalchemy2 import functions as gfunc
 
 from app.database import get_db
 from app.models import Territory, User
 from app.schemas import TerritoryResponse, TerritoryListResponse
-from app.auth import decode_access_token
+from app.deps import friend_ids_subquery, get_current_user, get_optional_user
 
 router = APIRouter(prefix="/territories", tags=["territories"])
 
 
-def get_current_user(
-    authorization: str | None = Header(default=None),
-    db: Session = Depends(get_db),
-):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing token")
-
-    token = authorization.split(" ", 1)[1]
-    payload = decode_access_token(token)
-
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user = db.query(User).filter(User.id == int(user_id)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    return user
-
-
 @router.get("", response_model=TerritoryListResponse)
-def get_all_territories(db: Session = Depends(get_db)):
-    """Return every user's territory as GeoJSON (for rendering on the map)."""
-    territories = (
-        db.query(Territory, User.name)
-        .join(User, User.id == Territory.user_id)
-        .all()
-    )
+def get_all_territories(
+    scope: Literal["all", "friends", "mine"] = Query(default="all"),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
+):
+    """Return territories as GeoJSON (for rendering on the map).
+
+    scope=all is public. friends (people you follow plus you) and mine need a token.
+    """
+    query = db.query(Territory, User.name).join(User, User.id == Territory.user_id)
+    if scope != "all":
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Missing token")
+        if scope == "mine":
+            query = query.filter(Territory.user_id == current_user.id)
+        else:
+            query = query.filter(Territory.user_id.in_(friend_ids_subquery(current_user)))
+    territories = query.all()
 
     items = []
     for terr, user_name in territories:

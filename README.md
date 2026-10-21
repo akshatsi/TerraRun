@@ -54,6 +54,20 @@ fitness_game_app/
 └── pubspec.yaml
 ```
 
+## API: following
+
+Following is one-way, like Strava. "Friends" means the people you follow. See
+`docs/social.md` for the full contract.
+
+- `GET /users/search?q=`, `GET /users/{id}`, `POST` and `DELETE /users/{id}/follow`
+- `GET /me/following`, `GET /me/followers`, `GET /feed?limit=&before_id=`
+- `GET /territories?scope=all|friends|mine`
+- `GET /leaderboard?scope=all|friends&period=all|week`
+- `GET /runs/{id}`: run detail with per-km splits, elevation gain and top speed
+- `PATCH /users/me` (name, bio), `GET /users/me/card`
+
+All need a bearer token except `scope=all` on territories and the leaderboard.
+
 ## Running locally
 
 ```bash

@@ -8,6 +8,7 @@ from app.routes.run_routes import router as run_router
 from app.routes.stats_routes import router as stats_router
 from app.routes.leaderboard_routes import router as leaderboard_router
 from app.routes.territory_routes import router as territory_router
+from app.routes.user_routes import router as user_router
 
 
 Base.metadata.create_all(bind=engine)
@@ -35,6 +36,7 @@ app.include_router(run_router)
 app.include_router(stats_router)
 app.include_router(leaderboard_router)
 app.include_router(territory_router)
+app.include_router(user_router)
 
 
 @app.get("/")

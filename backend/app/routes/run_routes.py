@@ -2,40 +2,25 @@ import json
 import math
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.gps.splits import (
+    TrackPoint, compute_splits, elevation_gain_m, max_speed_kmh,
+)
 from app.gps import ALGORITHM_VERSION, RawFix, TrackConfig, process_track
 from app.models import GpsFix, Run, User
-from app.schemas import ProcessingInfo, RunCreateRequest, RunResponse, TerritoryInfo
-from app.auth import decode_access_token
+from app.schemas import (
+    FeedUser, ProcessingInfo, RunCreateRequest, RunDetail, RunDetailTerritory,
+    RunResponse, SplitOut, TerritoryInfo,
+)
+from app.deps import get_current_user
 from app.territory import MIN_AWARD_DISTANCE_M, claim_territory, user_territory_summary
 
 router = APIRouter(prefix="/runs", tags=["runs"])
-
-
-def get_current_user(
-    authorization: str | None = Header(default=None),
-    db: Session = Depends(get_db),
-):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing token")
-
-    token = authorization.split(" ", 1)[1]
-    payload = decode_access_token(token)
-
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user = db.query(User).filter(User.id == int(user_id)).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    return user
 
 
 # Legacy payloads carry no timestamps. We invent them so the engine's
@@ -344,3 +329,69 @@ def get_runs(
         .all()
     )
     return [_run_response(db, run, include_territory_geojson=False) for run in runs]
+
+
+@router.get("/{run_id}", response_model=RunDetail)
+def get_run_detail(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    run = db.get(Run, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    owner = db.get(User, run.user_id)
+
+    fixes = (
+        db.query(GpsFix)
+        .filter(GpsFix.run_id == run.id, GpsFix.accepted.is_(True),
+                GpsFix.recorded_at.isnot(None))
+        .order_by(GpsFix.seq)
+        .all()
+    )
+    points = [
+        TrackPoint(
+            lat=f.latitude, lng=f.longitude,
+            t=_as_utc(f.recorded_at).timestamp(),
+            segment=f.segment_id if f.segment_id is not None else 0,
+            altitude_m=f.altitude_m, speed_mps=f.reported_speed_mps,
+        )
+        for f in fixes
+    ]
+    splits = compute_splits(points)
+
+    distance_km = run.distance_km or 0.0
+    time_s = run.moving_time_s if run.moving_time_s else run.duration_seconds
+    avg_speed = round(distance_km / (time_s / 3600.0), 2) if distance_km > 0 and time_s else 0.0
+    avg_pace = round(time_s / distance_km) if distance_km > 0 and time_s else None
+
+    return RunDetail(
+        run_id=run.id,
+        created_at=run.created_at,
+        user=FeedUser(id=owner.id, name=owner.name),
+        is_mine=run.user_id == current_user.id,
+        distance_km=distance_km,
+        duration_seconds=run.duration_seconds,
+        moving_time_s=run.moving_time_s,
+        avg_speed_kmh=avg_speed,
+        avg_pace_s_per_km=avg_pace,
+        elevation_gain_m=elevation_gain_m(points),
+        max_speed_kmh=max_speed_kmh(points),
+        quality=run.quality,
+        territory=RunDetailTerritory(
+            kind=run.territory_kind or "none",
+            awarded_area_sq_m=round(run.awarded_area_sq_m or 0.0, 2),
+            reason=_kind_reason(run),
+        ),
+        route_geojson=_geojson(db, run.id, "COALESCE(processed_route_geom, route_geom)"),
+        awarded_geojson=_geojson(db, run.id, "awarded_geom"),
+        splits=[
+            SplitOut(
+                km=sp.km, distance_m=round(sp.distance_m, 1),
+                duration_s=round(sp.duration_s, 1),
+                pace_s_per_km=sp.pace_s_per_km,
+                elevation_change_m=sp.elevation_change_m,
+            )
+            for sp in splits
+        ],
+    )
