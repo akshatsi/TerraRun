@@ -18,7 +18,10 @@ _url = os.environ.get("DATABASE_URL", "")
 # The database tests truncate every table, so they only run against a database
 # whose name contains "test". The engine tests need no database and always run.
 DB_OK = "test" in _url.rsplit("/", 1)[-1]
-DB_FREE_MODULES = {"test_gps_engine.py", "test_territory_shape.py", "test_splits.py"}
+DB_FREE_MODULES = {
+    "test_gps_engine.py", "test_territory_shape.py", "test_splits.py",
+    "test_route_planner.py", "test_roads.py",
+}
 
 
 def pytest_collection_modifyitems(config, items):
@@ -118,7 +121,8 @@ def _clean(request):
     request.getfixturevalue("_schema")
     with engine.begin() as conn:
         conn.execute(text(
-            "TRUNCATE follows, gps_fixes, runs, territories, users RESTART IDENTITY CASCADE"
+            "TRUNCATE follows, gps_fixes, runs, territories, users, road_ways, road_tiles "
+            "RESTART IDENTITY CASCADE"
         ))
     yield
 

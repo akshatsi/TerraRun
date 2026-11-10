@@ -231,3 +231,29 @@ class RunDetail(BaseModel):
     route_geojson: Optional[dict] = None
     awarded_geojson: Optional[dict] = None
     splits: list[SplitOut] = []
+
+
+class StolenFrom(BaseModel):
+    user_id: int
+    name: str
+    area_sq_m: float
+
+
+class RouteSuggestion(BaseModel):
+    label: str
+    reason: str
+    distance_km: float
+    estimated_minutes: int
+    new_area_sq_m: float
+    stolen_area_sq_m: float
+    stolen_from: list[StolenFrom] = []
+    gain_sq_m: float
+    route_geojson: dict
+    area_geojson: dict
+
+
+class SuggestionsResponse(BaseModel):
+    target_distance_km: float
+    pace_s_per_km: int
+    suggestions: list[RouteSuggestion] = []
+    message: Optional[str] = None

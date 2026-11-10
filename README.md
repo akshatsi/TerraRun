@@ -65,6 +65,7 @@ Following is one-way, like Strava. "Friends" means the people you follow. See
 - `GET /leaderboard?scope=all|friends&period=all|week`
 - `GET /runs/{id}`: run detail with per-km splits, elevation gain and top speed
 - `PATCH /users/me` (name, bio), `GET /users/me/card`
+- `GET /suggestions?lat=&lng=[&distance_km=|&minutes=]`: up to 3 road loops that win land, sized to your usual run; roads come from OpenStreetMap (several public Overpass servers are tried in turn; set `OVERPASS_URL` to a comma-separated list to use your own). See `docs/route-suggestions.md`
 
 All need a bearer token except `scope=all` on territories and the leaderboard.
 

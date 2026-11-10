@@ -153,3 +153,22 @@ class Follow(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class RoadWay(Base):
+    """A cached OpenStreetMap road (allowed classes only), see docs/route-suggestions.md."""
+    __tablename__ = "road_ways"
+
+    osm_id = Column(BigInteger, primary_key=True, autoincrement=False)
+    highway = Column(String(32), nullable=False)
+    geom = Column(Geometry("LINESTRING", srid=4326, spatial_index=True), nullable=False)
+    tile_key = Column(String(24), nullable=False, index=True)
+    fetched_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class RoadTile(Base):
+    """A 0.01 degree map tile whose roads have been fetched, and when."""
+    __tablename__ = "road_tiles"
+
+    tile_key = Column(String(24), primary_key=True)
+    fetched_at = Column(DateTime(timezone=True), nullable=False)
