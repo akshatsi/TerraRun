@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../data/planned_route_store.dart';
 import '../data/run_data.dart';
 import '../services/location_service.dart';
 import '../services/run_store.dart';
@@ -38,8 +39,13 @@ class _MainNavigationState extends State<MainNavigation>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    PlannedRouteStore.runTabRequests.addListener(_openRunTab);
     LocationService.startPassive();
     _uploadSavedRuns(recover: true);
+  }
+
+  void _openRunTab() {
+    if (mounted) onItemTapped(2);
   }
 
   /// Sends runs that never reached the server, including one an earlier
@@ -60,6 +66,7 @@ class _MainNavigationState extends State<MainNavigation>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    PlannedRouteStore.runTabRequests.removeListener(_openRunTab);
     LocationService.stopPassive();
     super.dispose();
   }

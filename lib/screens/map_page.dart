@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import '../data/planned_route_store.dart';
 import '../data/run_data.dart';
+import '../models/route_suggestion.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/stats_service.dart';
@@ -12,6 +14,7 @@ import '../theme/app_theme.dart';
 import '../utils/format.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/map_tiles.dart';
+import '../widgets/suggestion_sheet.dart';
 import 'friends_page.dart';
 
 class MapPage extends StatefulWidget {
@@ -40,6 +43,9 @@ class _MapPageState extends State<MapPage> {
   // Index into TerritoryService.scopes: all players, friends, mine.
   int _scopeIndex = 0;
   int? _myUserId;
+
+  // The suggested route being looked at on the map.
+  RouteSuggestion? _preview;
 
   // --- Territory data ---
   List<Map<String, dynamic>> _territories = [];
@@ -217,8 +223,93 @@ class _MapPageState extends State<MapPage> {
     _loadTerritories();
   }
 
+  Future<void> _suggestRoute() async {
+    final lat = RunDataStore.currentLatitude;
+    final lng = RunDataStore.currentLongitude;
+    if (lat == null || lng == null) {
+      showAppToast(
+        context,
+        LocationService.hint ?? 'Waiting for your location…',
+      );
+      LocationService.requestFix();
+      return;
+    }
+
+    final picked = await showSuggestionSheet(context, lat: lat, lng: lng);
+    if (!mounted || picked == null) return;
+
+    setState(() {
+      _preview = picked;
+      _following = false;
+    });
+    mapController.fitCamera(
+      CameraFit.coordinates(
+        coordinates: picked.route,
+        padding: const EdgeInsets.fromLTRB(40, 180, 40, 300),
+        maxZoom: 17,
+      ),
+    );
+  }
+
+  void _runPreview() {
+    final route = _preview;
+    if (route == null) return;
+    PlannedRouteStore.set(route);
+    PlannedRouteStore.requestRunTab();
+  }
+
+  Widget _previewBar(RouteSuggestion route) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: AppCard(
+        color: AppColors.surface,
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(route.label, style: AppText.headline),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${route.distanceKm.toStringAsFixed(1)} km · '
+                        '${route.estimatedMinutes} min · '
+                        '+${Fmt.areaText(route.gainSqM)}',
+                        style: AppText.bodySecondary,
+                      ),
+                    ],
+                  ),
+                ),
+                AppIconButton(
+                  icon: Icons.close_rounded,
+                  size: 36,
+                  onTap: () => setState(() => _preview = null),
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 12, right: 8),
+              child: PrimaryButton(
+                label: 'Run this route',
+                icon: Icons.directions_run_rounded,
+                height: 44,
+                onPressed: _runPreview,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final preview = _preview;
+
     // Build territory polygon layers
     final List<Polygon> territoryPolygons = [];
 
@@ -289,6 +380,28 @@ class _MapPageState extends State<MapPage> {
               // --- Territory polygons ---
               if (territoryPolygons.isNotEmpty)
                 PolygonLayer(polygons: territoryPolygons),
+              if (preview != null && preview.areaRings.isNotEmpty)
+                PolygonLayer(
+                  polygons: [
+                    for (final ring in preview.areaRings)
+                      Polygon(
+                        points: ring,
+                        color: AppColors.signature.withValues(alpha: 0.12),
+                        borderColor: AppColors.signature.withValues(alpha: 0.7),
+                        borderStrokeWidth: 1.5,
+                      ),
+                  ],
+                ),
+              if (preview != null)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: preview.route,
+                      strokeWidth: 4,
+                      color: AppColors.signature,
+                    ),
+                  ],
+                ),
               if (latestPathPoints.length >= 2)
                 PolylineLayer(
                   polylines: [
@@ -301,6 +414,19 @@ class _MapPageState extends State<MapPage> {
                 ),
               MarkerLayer(
                 markers: [
+                  if (preview?.start != null)
+                    Marker(
+                      point: preview!.start!,
+                      width: 18,
+                      height: 18,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.signature,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.bg, width: 3),
+                        ),
+                      ),
+                    ),
                   if (hasLiveLocation)
                     Marker(
                       point: currentLatLng,
@@ -394,6 +520,12 @@ class _MapPageState extends State<MapPage> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           IconCircleButton(
+                            icon: Icons.route_rounded,
+                            active: preview != null,
+                            onTap: _suggestRoute,
+                          ),
+                          const SizedBox(height: 10),
+                          IconCircleButton(
                             icon: Icons.group_rounded,
                             onTap: _openFriends,
                           ),
@@ -416,6 +548,7 @@ class _MapPageState extends State<MapPage> {
                     ),
                   ),
                 ),
+                if (preview != null) _previewBar(preview),
                 ShadCard(
                   width: double.infinity,
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),

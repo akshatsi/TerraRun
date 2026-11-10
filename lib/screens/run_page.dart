@@ -4,6 +4,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import '../data/planned_route_store.dart';
 import '../data/run_data.dart';
 import '../gps/run_fix.dart';
 import '../gps/track_filter.dart';
@@ -64,9 +65,30 @@ class _RunPageState extends State<RunPage> {
   @override
   void initState() {
     super.initState();
+    PlannedRouteStore.current.addListener(_onPlannedChanged);
     LocationService.latest.addListener(_onLocationChanged);
     LocationService.status.addListener(_onLocationChanged);
     LocationService.error.addListener(_onLocationChanged);
+  }
+
+  void _onPlannedChanged() {
+    if (!mounted) return;
+    setState(() {});
+    _fitPlanned();
+  }
+
+  /// Shows the whole planned route, unless the map is following a run.
+  void _fitPlanned() {
+    final route = PlannedRouteStore.current.value;
+    if (route == null || !_mapReady || isRunning) return;
+    _following = false;
+    mapController.fitCamera(
+      CameraFit.coordinates(
+        coordinates: route.route,
+        padding: const EdgeInsets.fromLTRB(40, 140, 40, 280),
+        maxZoom: 17,
+      ),
+    );
   }
 
   void _onLocationChanged() {
@@ -283,6 +305,8 @@ class _RunPageState extends State<RunPage> {
       }
     }
 
+    if (uploaded || queued) PlannedRouteStore.clear();
+
     if (!mounted) return;
 
     setState(() {
@@ -395,6 +419,44 @@ class _RunPageState extends State<RunPage> {
     );
   }
 
+  Widget buildPlannedBanner() {
+    final text = PlannedRouteStore.followingText;
+    if (text == null) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.fromLTRB(14, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.route_rounded,
+            color: AppColors.textSecondary,
+            size: 16,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.label.copyWith(color: AppColors.text),
+            ),
+          ),
+          AppIconButton(
+            icon: Icons.close_rounded,
+            size: 32,
+            onTap: PlannedRouteStore.clear,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget buildBottomPanel() {
     return ShadCard(
       width: double.infinity,
@@ -470,6 +532,7 @@ class _RunPageState extends State<RunPage> {
 
   @override
   void dispose() {
+    PlannedRouteStore.current.removeListener(_onPlannedChanged);
     LocationService.latest.removeListener(_onLocationChanged);
     LocationService.status.removeListener(_onLocationChanged);
     LocationService.error.removeListener(_onLocationChanged);
@@ -496,7 +559,11 @@ class _RunPageState extends State<RunPage> {
               initialZoom: hasLocation ? 17 : 15,
               onMapReady: () {
                 _mapReady = true;
-                _followLatest();
+                if (PlannedRouteStore.hasRoute && !isRunning) {
+                  _fitPlanned();
+                } else {
+                  _followLatest();
+                }
               },
               onPositionChanged: (camera, hasGesture) {
                 if (hasGesture && _following) {
@@ -506,6 +573,16 @@ class _RunPageState extends State<RunPage> {
             ),
             children: [
               buildBaseTileLayer(),
+              if (PlannedRouteStore.current.value != null)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: PlannedRouteStore.current.value!.route,
+                      strokeWidth: 3,
+                      color: AppColors.textSecondary.withValues(alpha: 0.7),
+                    ),
+                  ],
+                ),
               PolylineLayer(
                 polylines: [
                   for (final line in _routeLines)
@@ -537,7 +614,12 @@ class _RunPageState extends State<RunPage> {
           ),
           SafeArea(
             child: Column(
-              children: [buildTopBanner(), const Spacer(), buildBottomPanel()],
+              children: [
+                buildTopBanner(),
+                buildPlannedBanner(),
+                const Spacer(),
+                buildBottomPanel(),
+              ],
             ),
           ),
         ],
