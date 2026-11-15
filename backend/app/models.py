@@ -2,7 +2,7 @@ from sqlalchemy import (
     Column, Integer, String, Float, ForeignKey, DateTime, Boolean, BigInteger,
     UniqueConstraint, Text, CheckConstraint, Index,
 )
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, true
 from geoalchemy2 import Geometry
 from .database import Base
 
@@ -47,6 +47,17 @@ RUN_ADDED_COLUMNS = [
     ("observed_area_sq_m", "DOUBLE PRECISION"),
     ("awarded_area_sq_m", "DOUBLE PRECISION"),
     ("territory_kind", "TEXT"),
+    ("clean_method", "TEXT"),
+    ("matched_fraction", "DOUBLE PRECISION"),
+]
+
+# Columns added to the road cache tables. Existing rows get the defaults: ways
+# cached so far are main roads (is_main true), in tiles of version 1.
+ROAD_WAY_ADDED_COLUMNS = [
+    ("is_main", "BOOLEAN NOT NULL DEFAULT TRUE"),
+]
+ROAD_TILE_ADDED_COLUMNS = [
+    ("version", "INTEGER NOT NULL DEFAULT 1"),
 ]
 
 
@@ -97,6 +108,10 @@ class Run(Base):
     awarded_area_sq_m = Column(Float, nullable=True)
     # "loop" | "route" | "none"; see docs/gps-accuracy.md section 4.
     territory_kind = Column(Text, nullable=True)
+    # "matched" | "smoothed" | "mixed" | "raw" and the share of the cleaned
+    # route lying on a mapped way; see docs/gps-accuracy.md section 6.
+    clean_method = Column(Text, nullable=True)
+    matched_fraction = Column(Float, nullable=True)
 
 
 class GpsFix(Base):
@@ -156,7 +171,7 @@ class Follow(Base):
 
 
 class RoadWay(Base):
-    """A cached OpenStreetMap road (allowed classes only), see docs/route-suggestions.md."""
+    """A cached OpenStreetMap walkable way; is_main marks the roads route suggestions use."""
     __tablename__ = "road_ways"
 
     osm_id = Column(BigInteger, primary_key=True, autoincrement=False)
@@ -164,11 +179,15 @@ class RoadWay(Base):
     geom = Column(Geometry("LINESTRING", srid=4326, spatial_index=True), nullable=False)
     tile_key = Column(String(24), nullable=False, index=True)
     fetched_at = Column(DateTime(timezone=True), nullable=False)
+    is_main = Column(Boolean, nullable=False, default=True, server_default=true())
 
 
 class RoadTile(Base):
-    """A 0.01 degree map tile whose roads have been fetched, and when."""
+    """A 0.01 degree map tile whose ways have been fetched, and when.
+
+    version 1: main roads only; version 2: every walkable way."""
     __tablename__ = "road_tiles"
 
     tile_key = Column(String(24), primary_key=True)
     fetched_at = Column(DateTime(timezone=True), nullable=False)
+    version = Column(Integer, nullable=False, default=1, server_default="1")

@@ -1,7 +1,9 @@
-"""Road data for route suggestions: Overpass client, filter, tile cache.
+"""Road data: Overpass client, filters, tile cache.
 
-See docs/route-suggestions.md. Roads come from OpenStreetMap, keep only the
-allowed classes, and are cached in PostGIS by 0.01 degree tile for 30 days.
+See docs/route-suggestions.md and docs/gps-accuracy.md section 6. Ways come
+from OpenStreetMap and are cached in PostGIS by 0.01 degree tile for 30 days.
+The cache keeps every walkable way; `is_main` marks the main roads that route
+suggestions use (`get_roads`). Track cleaning uses all of them (`get_walk_ways`).
 Tests pass a fake `fetcher` so nothing touches the network.
 """
 import json
@@ -44,7 +46,15 @@ ALLOWED_HIGHWAYS = frozenset(
      "living_street", "service"}
     | {f"{c}_link" for c in ("trunk", "primary", "secondary", "tertiary")}
 )
+# Every way a person can walk or run on, for cleaning recorded tracks.
+WALKABLE_HIGHWAYS = ALLOWED_HIGHWAYS | frozenset(
+    {"footway", "path", "pedestrian", "steps", "track", "cycleway", "corridor"}
+)
 BLOCKED_ACCESS = frozenset({"private", "no"})
+# Tiles stored before walkable ways were cached hold main roads only (version 1).
+ROAD_DATA_VERSION = 2
+# Uploads wait this long for Overpass at most, then clean without road data.
+QUICK_BUDGET_S = 6.0
 
 # A fetcher takes (south, west, north, east) and returns raw Overpass elements.
 Fetcher = Callable[[tuple[float, float, float, float]], list[dict]]
@@ -67,9 +77,11 @@ def overpass_urls() -> list[str]:
     return urls or list(DEFAULT_OVERPASS_URLS)
 
 
-def overpass_fetch(bbox: tuple[float, float, float, float]) -> list[dict]:
+def overpass_fetch(
+    bbox: tuple[float, float, float, float], budget_s: float = TOTAL_BUDGET_S
+) -> list[dict]:
     """Raw way elements for the box, from the first Overpass server that answers."""
-    deadline = time.monotonic() + TOTAL_BUDGET_S
+    deadline = time.monotonic() + budget_s
     errors = []
     for url in overpass_urls():
         remaining = deadline - time.monotonic()
@@ -90,6 +102,11 @@ def overpass_fetch(bbox: tuple[float, float, float, float]) -> list[dict]:
     raise httpx.HTTPError("All Overpass servers failed: " + "; ".join(errors))
 
 
+def overpass_fetch_quick(bbox: tuple[float, float, float, float]) -> list[dict]:
+    """overpass_fetch with a short budget, for requests a person is waiting on."""
+    return overpass_fetch(bbox, budget_s=QUICK_BUDGET_S)
+
+
 # --- Filter and conversion -------------------------------------------------
 
 def is_allowed_way(tags: dict) -> bool:
@@ -106,6 +123,22 @@ def is_allowed_way(tags: dict) -> bool:
     return True
 
 
+def is_walkable_way(tags: dict) -> bool:
+    """True for any way a runner may be on, footpaths included."""
+    if tags.get("highway") not in WALKABLE_HIGHWAYS:
+        return False
+    if tags.get("access") in BLOCKED_ACCESS:
+        return False
+    if tags.get("area") == "yes":
+        return False
+    return True
+
+
+def _element_points(element: dict) -> list[tuple[float, float]]:
+    return [(float(p["lat"]), float(p["lon"])) for p in element.get("geometry") or []
+            if p and "lat" in p and "lon" in p]
+
+
 def element_to_road(element: dict) -> RoadWay | None:
     """RoadWay for an Overpass way element, or None if it is filtered out."""
     if element.get("type", "way") != "way":
@@ -113,11 +146,27 @@ def element_to_road(element: dict) -> RoadWay | None:
     tags = element.get("tags") or {}
     if not is_allowed_way(tags):
         return None
-    points = [(float(p["lat"]), float(p["lon"])) for p in element.get("geometry") or []
-              if p and "lat" in p and "lon" in p]
+    points = _element_points(element)
     if len(points) < 2:
         return None
     return RoadWay(osm_id=int(element["id"]), highway=tags["highway"], points=points)
+
+
+def filter_walkable(elements: Iterable[dict]) -> list[tuple[RoadWay, bool]]:
+    """(way, is_main) for every walkable way in the elements."""
+    out = []
+    for element in elements:
+        if element.get("type", "way") != "way":
+            continue
+        tags = element.get("tags") or {}
+        if not is_walkable_way(tags):
+            continue
+        points = _element_points(element)
+        if len(points) < 2:
+            continue
+        out.append((RoadWay(osm_id=int(element["id"]), highway=tags["highway"], points=points),
+                    is_allowed_way(tags)))
+    return out
 
 
 def filter_roads(elements: Iterable[dict]) -> list[RoadWay]:
@@ -155,12 +204,26 @@ def circle_bbox(center: tuple[float, float], radius_m: float) -> tuple[float, fl
     return lat - dlat, lng - dlng, lat + dlat, lng + dlng
 
 
-def tiles_covering(center: tuple[float, float], radius_m: float) -> list[str]:
-    """Keys of every tile touched by the circle's bounding box."""
-    s, w, n, e = circle_bbox(center, radius_m)
+def tiles_covering_bbox(bbox: tuple[float, float, float, float]) -> list[str]:
+    """Keys of every tile touched by the (south, west, north, east) box."""
+    s, w, n, e = bbox
     r0, c0 = tile_index(s, w)
     r1, c1 = tile_index(n, e)
     return [f"{r}_{c}" for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)]
+
+
+def tiles_covering(center: tuple[float, float], radius_m: float) -> list[str]:
+    """Keys of every tile touched by the circle's bounding box."""
+    return tiles_covering_bbox(circle_bbox(center, radius_m))
+
+
+def expand_bbox(
+    bbox: tuple[float, float, float, float], margin_m: float
+) -> tuple[float, float, float, float]:
+    s, w, n, e = bbox
+    dlat = margin_m / M_PER_DEG_LAT
+    dlng = margin_m / (M_PER_DEG_LAT * max(cos(radians((s + n) / 2)), 0.01))
+    return s - dlat, w - dlng, n + dlat, e + dlng
 
 
 # --- Cache -----------------------------------------------------------------
@@ -169,11 +232,12 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _store(db: Session, keys: list[str], roads: list[RoadWay], now: datetime) -> None:
-    """Replace the cached roads of `keys` and mark those tiles fetched."""
+def _store(db: Session, keys: list[str], ways: list[tuple[RoadWay, bool]], now: datetime,
+           commit: bool = True) -> None:
+    """Replace the cached ways of `keys` and mark those tiles fetched."""
     db.execute(delete(RoadWayRow).where(RoadWayRow.tile_key.in_(keys)))
     rows = []
-    for road in roads:
+    for road, is_main in ways:
         line = LineString([(lng, lat) for lat, lng in road.points])
         rows.append({
             "osm_id": road.osm_id,
@@ -181,6 +245,7 @@ def _store(db: Session, keys: list[str], roads: list[RoadWay], now: datetime) ->
             "geom": f"SRID=4326;{line.wkt}",
             "tile_key": tile_key_for(*road.points[0]),
             "fetched_at": now,
+            "is_main": is_main,
         })
     # An OSM way can come back from two neighbouring tiles; the last copy wins.
     unique = {r["osm_id"]: r for r in rows}
@@ -188,14 +253,36 @@ def _store(db: Session, keys: list[str], roads: list[RoadWay], now: datetime) ->
         stmt = pg_insert(RoadWayRow).values(list(unique.values()))
         stmt = stmt.on_conflict_do_update(
             index_elements=["osm_id"],
-            set_={c: stmt.excluded[c] for c in ("highway", "geom", "tile_key", "fetched_at")},
+            set_={c: stmt.excluded[c]
+                  for c in ("highway", "geom", "tile_key", "fetched_at", "is_main")},
         )
         db.execute(stmt)
-    tiles = pg_insert(RoadTile).values([{"tile_key": k, "fetched_at": now} for k in keys])
+    tiles = pg_insert(RoadTile).values(
+        [{"tile_key": k, "fetched_at": now, "version": ROAD_DATA_VERSION} for k in keys]
+    )
     db.execute(tiles.on_conflict_do_update(
-        index_elements=["tile_key"], set_={"fetched_at": tiles.excluded.fetched_at}
+        index_elements=["tile_key"],
+        set_={"fetched_at": tiles.excluded.fetched_at, "version": tiles.excluded.version},
     ))
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+
+
+def _fetch_and_store(db: Session, todo: list[str], fetcher: Fetcher, now: datetime,
+                     commit: bool) -> Exception | None:
+    """Fetch the tiles in one request and cache them. Returns the error, if any."""
+    boxes = [tile_bbox(k) for k in todo]
+    bbox = (min(b[0] for b in boxes), min(b[1] for b in boxes),
+            max(b[2] for b in boxes), max(b[3] for b in boxes))
+    try:
+        ways = filter_walkable(fetcher(bbox))
+    except Exception as exc:  # network, HTTP, bad JSON: all mean "no fresh data"
+        log.warning("Overpass fetch failed: %s", exc)
+        return exc
+    _store(db, todo, ways, now, commit)
+    return None
 
 
 def get_roads(
@@ -205,11 +292,12 @@ def get_roads(
     fetcher: Fetcher | None = None,
     now: datetime | None = None,
 ) -> list[RoadWay]:
-    """Allowed roads within radius_m of center (lat, lng).
+    """Main roads within radius_m of center (lat, lng), for route suggestions.
 
     Tiles covering the circle that are missing or older than 30 days are
     fetched in one request. If that fails, cached tiles are used; with no
-    cached tile at all, raises RoadDataUnavailable.
+    cached tile at all, raises RoadDataUnavailable. Tiles cached before
+    walkable ways were stored are fine as they are: they hold the main roads.
     """
     fetcher = fetcher or overpass_fetch
     now = now or _now()
@@ -222,21 +310,57 @@ def get_roads(
     todo = [k for k in keys if k not in have or have[k] < fresh_after]
 
     if todo:
-        boxes = [tile_bbox(k) for k in todo]
-        bbox = (min(b[0] for b in boxes), min(b[1] for b in boxes),
-                max(b[2] for b in boxes), max(b[3] for b in boxes))
-        try:
-            roads = filter_roads(fetcher(bbox))
-        except Exception as exc:  # network, HTTP, bad JSON: all mean "no fresh data"
-            log.warning("Overpass fetch failed: %s", exc)
-            if not have:
-                raise RoadDataUnavailable(
-                    "Road data is unavailable right now. Try again soon."
-                ) from exc
-        else:
-            _store(db, todo, roads, now)
+        exc = _fetch_and_store(db, todo, fetcher, now, commit=True)
+        if exc is not None and not have:
+            raise RoadDataUnavailable(
+                "Road data is unavailable right now. Try again soon."
+            ) from exc
 
     return _load(db, center, radius_m)
+
+
+def get_walk_ways(
+    db: Session,
+    bbox: tuple[float, float, float, float],
+    fetcher: Fetcher | None = None,
+    now: datetime | None = None,
+    commit: bool = True,
+) -> list:
+    """Every walkable way touching the (south, west, north, east) box, as WalkWays.
+
+    Tiles that are missing, older than 30 days, or cached before walkable ways
+    were stored (version below ROAD_DATA_VERSION) are fetched in one request.
+    If that fails, cached tiles are used as they are; with no cached tile at
+    all, raises RoadDataUnavailable. `commit=False` leaves the transaction to
+    the caller (the cache rows are flushed, not committed).
+    """
+    from app.gps.clean_track import WalkWay
+
+    fetcher = fetcher or overpass_fetch
+    now = now or _now()
+    keys = tiles_covering_bbox(bbox)
+    fresh_after = now - timedelta(days=CACHE_DAYS)
+
+    have = {k: (at, ver) for k, at, ver in db.execute(
+        select(RoadTile.tile_key, RoadTile.fetched_at, RoadTile.version)
+        .where(RoadTile.tile_key.in_(keys))
+    ).all()}
+    todo = [k for k in keys
+            if k not in have or have[k][0] < fresh_after or have[k][1] < ROAD_DATA_VERSION]
+
+    if todo:
+        exc = _fetch_and_store(db, todo, fetcher, now, commit)
+        if exc is not None and not have:
+            raise RoadDataUnavailable("Walkable ways are unavailable.") from exc
+
+    s, w, n, e = bbox
+    rows = db.execute(
+        select(RoadWayRow.osm_id, RoadWayRow.highway, func.ST_AsGeoJSON(RoadWayRow.geom))
+        .where(RoadWayRow.geom.op("&&")(func.ST_MakeEnvelope(w, s, e, n, 4326)))
+    ).all()
+    return [WalkWay(osm_id=osm_id, highway=highway,
+                    points=[(c[1], c[0]) for c in json.loads(gj)["coordinates"]])
+            for osm_id, highway, gj in rows]
 
 
 def _load(db: Session, center: tuple[float, float], radius_m: float) -> list[RoadWay]:
@@ -245,6 +369,7 @@ def _load(db: Session, center: tuple[float, float], radius_m: float) -> list[Roa
     rows = db.execute(
         select(RoadWayRow.osm_id, RoadWayRow.highway, func.ST_AsGeoJSON(RoadWayRow.geom))
         .where(
+            RoadWayRow.is_main.is_(True),
             RoadWayRow.geom.op("&&")(func.ST_MakeEnvelope(w, s, e, n, 4326)),
             func.ST_DWithin(
                 text("road_ways.geom::geography"),

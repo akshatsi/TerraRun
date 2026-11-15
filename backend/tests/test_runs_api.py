@@ -307,10 +307,10 @@ def test_reprocess_shrinks_territories_and_is_idempotent(client, make_user):
     fixes_before = db_scalar("SELECT md5(string_agg(latitude::text || longitude::text || seq::text, ',' ORDER BY id)) FROM gps_fixes")
     runs_before = [(r[0], r[1]) for r in run_state()]
 
-    assert rp.main(["--dry-run"]) == 0
+    assert rp.main(["--dry-run", "--offline"]) == 0
     assert {u: float(a) for u, a, _ in territory_state()} == old  # dry run changed nothing
 
-    assert rp.main([]) == 0
+    assert rp.main(["--offline"]) == 0
     new = {u: float(a) for u, a, _ in territory_state()}
     assert new[1] == pytest.approx(100 * 100, rel=0.05)           # the loop
     assert 200 * 6 * 0.9 < new[2] < 200 * 6 * 1.1 + 600 * 6 * 1.1  # two route strips
@@ -327,7 +327,7 @@ def test_reprocess_shrinks_territories_and_is_idempotent(client, make_user):
 
     # Second run is a no-op.
     t1, r1 = territory_state(), run_state()
-    assert rp.main([]) == 0
+    assert rp.main(["--offline"]) == 0
     assert territory_state() == t1 and run_state() == r1
 
 
@@ -339,6 +339,7 @@ NEW_COLUMNS = {
     "gap_count", "quality", "algorithm_version", "status", "processed_at",
     "processed_route_geom", "observed_corridor_geom", "awarded_geom",
     "observed_area_sq_m", "awarded_area_sq_m", "territory_kind",
+    "clean_method", "matched_fraction",
 }
 
 

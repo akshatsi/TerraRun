@@ -20,7 +20,8 @@ _url = os.environ.get("DATABASE_URL", "")
 DB_OK = "test" in _url.rsplit("/", 1)[-1]
 DB_FREE_MODULES = {
     "test_gps_engine.py", "test_territory_shape.py", "test_splits.py",
-    "test_route_planner.py", "test_roads.py",
+    "test_route_planner.py", "test_roads.py", "test_enclosure.py",
+    "test_clean_track.py",
 }
 
 
@@ -125,6 +126,23 @@ def _clean(request):
             "RESTART IDENTITY CASCADE"
         ))
     yield
+
+
+def _offline_fetcher(bbox):
+    raise ConnectionError("tests never reach Overpass")
+
+
+@pytest.fixture(autouse=True)
+def _no_overpass(request):
+    """Uploads clean tracks with walkable ways; tests must not call the network."""
+    if not _needs_db(request):
+        yield
+        return
+    from app.main import app
+    from app.routes.run_routes import get_walk_fetcher
+    app.dependency_overrides[get_walk_fetcher] = lambda: _offline_fetcher
+    yield
+    app.dependency_overrides.pop(get_walk_fetcher, None)
 
 
 @pytest.fixture()

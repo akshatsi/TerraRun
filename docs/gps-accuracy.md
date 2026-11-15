@@ -222,3 +222,90 @@ stored runs, in the order they were recorded, using the current rules.
 - Saves the run in progress to local storage, and keeps finished runs in an
   upload queue that retries with the same `client_run_id` until the server
   accepts it.
+
+## 6. Clean tracks (v4)
+
+Raw GPS wanders left and right on a straight road, so a recorded route looks
+ragged and its 3 m strip breaks into patches. Before territory is built, the
+server turns the accepted fixes into a **clean track** that follows the road or
+path the runner was actually on, the way a suggested route does.
+
+```python
+from app.gps.clean_track import WalkWay, CleanConfig, CleanTrack, clean_track
+
+WalkWay(osm_id: int, highway: str, points: list[tuple[float, float]])   # (lat, lng); ANY walkable way
+
+clean = clean_track(
+    segments: list[list[tuple[float, float]]],   # accepted fixes per engine segment, (lat, lng), in order
+    accuracies: list[list[float | None]],        # horizontal accuracy per fix, same shape as segments
+    ways: list[WalkWay],                         # walkable ways near the run; [] if none could be loaded
+    config: CleanConfig = CleanConfig(),
+)
+clean.segments          # cleaned (lat, lng) per segment; SAME number of segments, never joined across a gap
+clean.method            # "matched" | "smoothed" | "mixed" | "raw"
+clean.matched_fraction  # share of the cleaned length that lies on a way (0..1)
+clean.notes             # short text for logs
+```
+
+Rules:
+- **On a road or path:** snap to it (map matching over the way network, so a
+  straight road gives a straight line and turns happen at junctions). Ways for
+  matching include footways and paths (`highway` = any of footway, path,
+  pedestrian, steps, track, cycleway, service, residential, living_street,
+  unclassified, tertiary, secondary, primary, trunk and `_link`s, corridor).
+- **Off any way** (parks, open ground, missing map data): keep the runner's own
+  line but smooth it (remove the left-right wobble, keep real turns), never snap
+  it onto a road it wasn't on.
+- Never invent distance across gaps; segment boundaries are kept.
+- The engine's accepted distance stays the recorded distance (it is validated);
+  the clean track is used for territory and for display.
+- With no ways available, the result is smoothed only (`method = "smoothed"`).
+
+Storage: `runs.processed_route_geom` holds the clean track;
+`runs.clean_method` (text) and `runs.matched_fraction` (float) are new.
+Walkable ways come from OpenStreetMap through the same tile cache as roads
+(`road_ways` keeps every walkable way; route suggestions still use main roads
+only).
+
+Wiring facts:
+- `road_ways.is_main` marks main roads (route suggestions read only those).
+  `road_tiles.version` is 2 for tiles holding every walkable way; older tiles
+  (version 1, main roads only) are refetched when walkable ways are needed and
+  used as they are if that fails or for suggestions. Both columns are added by
+  `setup_postgis.py` with defaults, so existing data stays valid.
+- `POST /runs` fetches ways for the run's box plus 50 m with a 6 s Overpass
+  budget. If that fails and nothing is cached, the track is only smoothed;
+  an upload never fails for road data.
+- Old uploads without fixes are cleaned as one segment (their timestamps are
+  invented, so no gap is real).
+- `awarded_area_sq_m` includes land filled by section 7; the upload `reason`
+  says how much. `reprocess_territories.py` has `--dry-run` (writes nothing,
+  road cache included) and `--offline` (cached ways only), and re-derives
+  `processed_route_geom`, `clean_method` and `matched_fraction`.
+
+## 7. Land enclosed by your territory (v4)
+
+Territory builds up over many runs. When your own territory surrounds an area
+— for example you walked up one street on Monday and back down another on
+Tuesday — the area inside becomes yours too, like closing a loop across runs.
+
+```python
+from app.gps.enclosure import EnclosureConfig, enclosed_by
+
+filled = enclosed_by(
+    territory,              # shapely (Multi)Polygon, WGS-84 — the runner's territory after this run
+    config: EnclosureConfig = EnclosureConfig(),
+)                           # shapely (Multi)Polygon of NEW area to add (inside, not already in territory), or None
+```
+
+Rules (defaults in `EnclosureConfig`, documented in the module):
+- Holes completely surrounded by the runner's territory are filled.
+- Small GPS gaps between strips from different runs (up to `gap_m`, about
+  20 m) still count as closed, but bridging a gap must not turn two nearby
+  parallel strips into one wide block: only areas truly walled off by the
+  territory (with the gaps bridged) are added, not the space next to a strip.
+- An enclosed area must be at least `min_area_sq_m` (200 m²) and wider than
+  about 30 m somewhere, so thin slivers between strips are not filled.
+- Filled land is awarded like a loop: taken from whoever held it.
+- `award_run` applies this after merging each run; `reprocess_territories.py`
+  rebuilds everything with it.

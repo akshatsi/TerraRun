@@ -169,7 +169,9 @@ when road data can't be fetched and nothing is cached.
 ## Road cache
 
 Table `road_ways`: `osm_id` (primary key), `highway`, `geom` (LINESTRING 4326),
-`tile_key` (indexed), `fetched_at`. Table `road_tiles`: `tile_key` (primary
-key), `fetched_at`. Tiles are fixed squares (0.01° lat × 0.01° lng, about
+`tile_key` (indexed), `fetched_at`, `is_main` (only main roads are used for
+suggestions; the other walkable ways serve track cleaning, see
+gps-accuracy.md section 6). Table `road_tiles`: `tile_key` (primary
+key), `fetched_at`, `version`. Tiles are fixed squares (0.01° lat × 0.01° lng, about
 1.1 km); a tile is refetched after 30 days. Tests never touch the network: the
 Overpass client is injectable and tests use a synthetic grid of streets.

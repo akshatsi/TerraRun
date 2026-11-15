@@ -5,9 +5,11 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../data/planned_route_store.dart';
 import '../data/run_data.dart';
+import '../models/map_route.dart';
 import '../models/route_suggestion.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
+import '../services/social_service.dart';
 import '../services/stats_service.dart';
 import '../services/territory_service.dart';
 import '../theme/app_theme.dart';
@@ -16,6 +18,7 @@ import '../widgets/app_widgets.dart';
 import '../widgets/map_tiles.dart';
 import '../widgets/suggestion_sheet.dart';
 import 'friends_page.dart';
+import 'run_detail_page.dart';
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -46,6 +49,11 @@ class _MapPageState extends State<MapPage> {
 
   // The suggested route being looked at on the map.
   RouteSuggestion? _preview;
+
+  // Most recent runs drawn as lines.
+  static const _maxRoutes = 30;
+  List<MapRoute> _friendRoutes = [];
+  List<MapRoute> _myRoutes = [];
 
   // --- Territory data ---
   List<Map<String, dynamic>> _territories = [];
@@ -83,6 +91,7 @@ class _MapPageState extends State<MapPage> {
     LocationService.latest.addListener(_followLatest);
     _loadRuns();
     _loadTerritories();
+    _loadFriendRoutes();
     AuthService.getUserId().then((id) {
       if (mounted) setState(() => _myUserId = id);
     });
@@ -114,6 +123,11 @@ class _MapPageState extends State<MapPage> {
       }
 
       setState(() {
+        _myRoutes = runs
+            .take(_maxRoutes)
+            .map(MapRoute.fromRun)
+            .whereType<MapRoute>()
+            .toList();
         _totalRuns = runs.length;
         _totalDistance = totalDistance;
         _isLoadingStats = false;
@@ -153,6 +167,32 @@ class _MapPageState extends State<MapPage> {
         _myTerritoryArea = ((data['area_sq_m'] ?? 0) as num).toDouble();
       });
     }
+  }
+
+  /// Friends' recent runs for the Friends scope. Runs apart from the
+  /// territory layer, and any failure leaves the territories as they are.
+  Future<void> _loadFriendRoutes() async {
+    if (_scopeIndex != 1) {
+      if (_friendRoutes.isNotEmpty) setState(() => _friendRoutes = []);
+      return;
+    }
+    final result = await SocialService.feed(limit: _maxRoutes);
+    if (!mounted || _scopeIndex != 1) return;
+    if (result['success'] != true || result['data'] is! List) return;
+
+    setState(() {
+      _friendRoutes = (result['data'] as List)
+          .map(MapRoute.fromFeedItem)
+          .whereType<MapRoute>()
+          .take(_maxRoutes)
+          .toList();
+    });
+  }
+
+  Future<void> _openRun(int runId) async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => RunDetailPage(runId: runId)));
   }
 
   /// Parse a GeoJSON geometry into a list of polygon point-lists.
@@ -213,6 +253,7 @@ class _MapPageState extends State<MapPage> {
     );
     if (!mounted) return;
     _loadTerritories();
+    _loadFriendRoutes();
   }
 
   Future<void> _openFriends() async {
@@ -221,6 +262,7 @@ class _MapPageState extends State<MapPage> {
     ).push(MaterialPageRoute(builder: (_) => const FriendsPage()));
     if (!mounted) return;
     _loadTerritories();
+    _loadFriendRoutes();
   }
 
   Future<void> _suggestRoute() async {
@@ -337,6 +379,51 @@ class _MapPageState extends State<MapPage> {
       }
     }
 
+    // Recent runs: friends' in muted hues, your own in the signature colour.
+    final List<MapRoute> shownRoutes = _scopeIndex == 1
+        ? _friendRoutes
+        : _scopeIndex == 2
+        ? _myRoutes
+        : const [];
+    final List<Polyline> routeLines = [];
+    final List<Marker> routeMarkers = [];
+    for (final route in shownRoutes) {
+      final color = _scopeIndex == 2
+          ? AppColors.signature
+          : _colorForUser(route.userId, false);
+      for (final line in route.lines) {
+        routeLines.add(
+          Polyline(
+            points: line,
+            strokeWidth: 2,
+            color: color.withValues(alpha: 0.8),
+          ),
+        );
+      }
+      routeMarkers.add(
+        Marker(
+          point: route.end,
+          width: 32,
+          height: 32,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _openRun(route.runId),
+            child: Center(
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.bg, width: 2),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     final statusText = _statsError != null
         ? _statsError!
         : RunDataStore.isRunActive
@@ -380,6 +467,7 @@ class _MapPageState extends State<MapPage> {
               // --- Territory polygons ---
               if (territoryPolygons.isNotEmpty)
                 PolygonLayer(polygons: territoryPolygons),
+              if (routeLines.isNotEmpty) PolylineLayer(polylines: routeLines),
               if (preview != null && preview.areaRings.isNotEmpty)
                 PolygonLayer(
                   polygons: [
@@ -414,6 +502,7 @@ class _MapPageState extends State<MapPage> {
                 ),
               MarkerLayer(
                 markers: [
+                  ...routeMarkers,
                   if (preview?.start != null)
                     Marker(
                       point: preview!.start!,
@@ -470,8 +559,10 @@ class _MapPageState extends State<MapPage> {
                       setState(() {
                         _scopeIndex = i;
                         _territories = [];
+                        _friendRoutes = [];
                       });
                       _loadTerritories();
+                      _loadFriendRoutes();
                     },
                   ),
                 ),

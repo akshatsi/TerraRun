@@ -17,7 +17,9 @@ from app.database import engine, Base
 
 # Import all models so Base.metadata knows about them
 import app.models  # noqa: F401
-from app.models import RUN_ADDED_COLUMNS, USER_ADDED_COLUMNS
+from app.models import (
+    ROAD_TILE_ADDED_COLUMNS, ROAD_WAY_ADDED_COLUMNS, RUN_ADDED_COLUMNS, USER_ADDED_COLUMNS,
+)
 
 
 def setup_database(bind=engine) -> None:
@@ -29,7 +31,12 @@ def setup_database(bind=engine) -> None:
     Base.metadata.create_all(bind=bind)
 
     with bind.begin() as conn:
-        for table, columns in (("runs", RUN_ADDED_COLUMNS), ("users", USER_ADDED_COLUMNS)):
+        for table, columns in (
+            ("runs", RUN_ADDED_COLUMNS),
+            ("users", USER_ADDED_COLUMNS),
+            ("road_ways", ROAD_WAY_ADDED_COLUMNS),
+            ("road_tiles", ROAD_TILE_ADDED_COLUMNS),
+        ):
             for name, sql_type in columns:
                 conn.execute(text(
                     f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {sql_type};"

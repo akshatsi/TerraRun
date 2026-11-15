@@ -12,21 +12,32 @@ Territory capture using PostGIS. See docs/gps-accuracy.md, section 4.
    with under MIN_TERRITORY_AREA_SQ_M is deleted) and merged into the runner's
    own. Stored geometries are always (Multi)Polygon.
 4. Areas are ST_Area(geom::geography), in square metres.
+5. Before step 1 the caller turns the accepted segments into a clean track
+   (``clean_segments``, docs/gps-accuracy.md section 6). After a run is merged,
+   land walled in by the runner's own territory is awarded too
+   (``app.gps.enclosure``, section 7).
 """
 
 import json
+import logging
 
 from shapely import wkb
 from shapely.geometry import LineString, MultiLineString
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.gps.clean_track import CleanTrack, clean_track
+from app.gps.enclosure import enclosed_by
 from app.gps.territory_shape import build_territory_shape
 from app.models import Territory
+from app.routing.roads import RoadDataUnavailable, expand_bbox, get_walk_ways
+
+log = logging.getLogger(__name__)
 
 MIN_AWARD_DISTANCE_M = 50    # shorter accepted distance earns nothing
 SRID_WGS84 = 4326
 MIN_TERRITORY_AREA_SQ_M = 1.0  # a rival's remainder below this is deleted
+WAYS_MARGIN_M = 50.0           # walkable ways are loaded this far around a run
 
 
 def build_multilinestring(segments: list[list[tuple[float, float]]]) -> MultiLineString | None:
@@ -46,6 +57,59 @@ def build_multilinestring(segments: list[list[tuple[float, float]]]) -> MultiLin
 
 def multilinestring_ewkt(mls: MultiLineString) -> str:
     return f"SRID={SRID_WGS84};{mls.wkt}"
+
+
+def clean_segments(
+    db: Session,
+    segments: list[list[tuple[float, float]]],
+    accuracies: list[list[float | None]] | None = None,
+    fetcher=None,
+    one_segment: bool = False,
+    commit: bool = True,
+) -> CleanTrack:
+    """Clean a run's accepted segments against the walkable ways around it.
+
+    Never raises because of road data: if the ways cannot be loaded the track is
+    only smoothed, and if cleaning itself fails the raw segments are returned
+    (method "raw"). `one_segment` joins the segments first, for old runs whose
+    timestamps were invented. `commit=False` keeps the road cache in the
+    caller's transaction (reprocess).
+    """
+    if accuracies is None or len(accuracies) != len(segments) or any(
+        len(a) != len(s) for a, s in zip(accuracies, segments)
+    ):
+        accuracies = [[None] * len(seg) for seg in segments]
+    if one_segment and len(segments) > 1:
+        segments = [[p for seg in segments for p in seg]]
+        accuracies = [[a for acc in accuracies for a in acc]]
+
+    ways = []
+    points = [p for seg in segments for p in seg]
+    if points:
+        lats, lngs = [p[0] for p in points], [p[1] for p in points]
+        bbox = expand_bbox((min(lats), min(lngs), max(lats), max(lngs)), WAYS_MARGIN_M)
+        try:
+            ways = get_walk_ways(db, bbox, fetcher, commit=commit)
+        except RoadDataUnavailable:
+            log.info("No road data for this run; smoothing only")
+        except Exception:
+            if not commit:
+                raise
+            log.exception("Loading walkable ways failed; smoothing only")
+            db.rollback()
+    try:
+        clean = clean_track(segments, accuracies, ways)
+    except Exception:
+        log.exception("clean_track failed; using the accepted fixes as they are")
+        return CleanTrack(segments=segments, method="raw", matched_fraction=0.0,
+                          notes="clean_track failed")
+    # Cleaning must never cost a runner a loop: a small loop with few fixes can
+    # be smoothed below the loop minimums. Then the accepted fixes are kept.
+    if build_territory_shape(clean.segments).kind != "loop" and \
+            build_territory_shape(segments).kind == "loop":
+        return CleanTrack(segments=segments, method="raw", matched_fraction=0.0,
+                          notes="kept the accepted fixes: cleaning lost the loop")
+    return clean
 
 
 def user_territory_summary(
@@ -102,9 +166,11 @@ def award_run(
         reason                short explanation
         route_ewkt            EWKT of the processed MultiLineString, or None
         corridor_hex          hex EWKB of the shape before rival handling, or None
-        awarded_hex           hex EWKB of the awarded geometry, or None
-        observed_area_sq_m
-        awarded_area_sq_m
+        awarded_hex           hex EWKB of the awarded geometry (shape plus any
+                              enclosed land), or None
+        observed_area_sq_m    area of the shape before rival handling
+        awarded_area_sq_m     area awarded: the shape plus enclosed_area_sq_m
+        enclosed_area_sq_m    land walled in by the runner's territory, awarded too
     """
     mls = build_multilinestring(segments)
     shape = build_territory_shape(segments, uncertain_distance_m)
@@ -126,11 +192,18 @@ def award_run(
         "awarded_hex": None,
         "observed_area_sq_m": observed_area,
         "awarded_area_sq_m": 0.0,
+        "enclosed_area_sq_m": 0.0,
     }
     if kind != "none" and corridor_hex:
-        award_polygon(db, user_id, corridor_hex)
+        filled_hex, filled_area = award_polygon(db, user_id, corridor_hex)
         result["awarded_hex"] = corridor_hex
         result["awarded_area_sq_m"] = observed_area
+        if filled_hex:
+            result["awarded_hex"] = _union_hex(db, corridor_hex, filled_hex)
+            result["awarded_area_sq_m"] = observed_area + filled_area
+            result["enclosed_area_sq_m"] = filled_area
+            result["reason"] = f"{reason}; {filled_area:,.0f} m² enclosed by your territory"
+            log.info("User %s: run filled %.0f m2 enclosed by own territory", user_id, filled_area)
     return result
 
 
@@ -150,7 +223,41 @@ def claim_territory(
     return result
 
 
-def award_polygon(db: Session, user_id: int, awarded_hex: str) -> None:
+def _union_hex(db: Session, a_hex: str, b_hex: str) -> str:
+    return db.execute(
+        text(
+            "SELECT ST_AsHexEWKB(ST_CollectionExtract(ST_MakeValid(ST_Union("
+            "ST_GeomFromEWKB(decode(:a, 'hex')), ST_GeomFromEWKB(decode(:b, 'hex')))), 3))"
+        ),
+        {"a": a_hex, "b": b_hex},
+    ).scalar()
+
+
+def award_polygon(
+    db: Session, user_id: int, awarded_hex: str, fill_enclosed: bool = True
+) -> tuple[str | None, float]:
+    """Cut the polygon out of rivals and merge it into the user's territory.
+
+    Then land walled in by the user's territory is awarded the same way (section
+    7), once. Returns (hex EWKB, area in m2) of that filled land, or (None, 0.0).
+    """
+    _merge_polygon(db, user_id, awarded_hex)
+    if not fill_enclosed:
+        return None, 0.0
+    row = db.execute(
+        text("SELECT ST_AsHexEWKB(geom) FROM territories WHERE user_id = :u"), {"u": user_id}
+    ).first()
+    if row is None or row[0] is None:
+        return None, 0.0
+    filled = enclosed_by(wkb.loads(row[0], hex=True))
+    filled_hex, filled_area = _areal_hex(db, filled)
+    if filled_hex is None:
+        return None, 0.0
+    _merge_polygon(db, user_id, filled_hex)
+    return filled_hex, filled_area
+
+
+def _merge_polygon(db: Session, user_id: int, awarded_hex: str) -> None:
     """Cut the polygon out of rivals and merge it into the user's territory."""
     params = {"h": awarded_hex, "u": user_id}
     awarded = "ST_GeomFromEWKB(decode(:h, 'hex'))"

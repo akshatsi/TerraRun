@@ -18,7 +18,10 @@ from app.schemas import (
     RunResponse, SplitOut, TerritoryInfo,
 )
 from app.deps import get_current_user
-from app.territory import MIN_AWARD_DISTANCE_M, claim_territory, user_territory_summary
+from app.routing.roads import overpass_fetch_quick
+from app.territory import (
+    MIN_AWARD_DISTANCE_M, claim_territory, clean_segments, user_territory_summary,
+)
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -31,6 +34,11 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 # are rejected, and no pair is split as a gap (the cap is under long_gap_s).
 LEGACY_ASSUMED_SPEED_MPS = 3.0
 LEGACY_MAX_DT_S = 10.0
+
+
+def get_walk_fetcher():
+    """Walkable-way fetcher for cleaning tracks. Short timeout; overridden in tests."""
+    return overpass_fetch_quick
 
 
 def _as_utc(dt: datetime | None) -> datetime | None:
@@ -147,6 +155,7 @@ def create_run(
     payload: RunCreateRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    walk_fetcher=Depends(get_walk_fetcher),
 ):
     existing = _find_existing(db, current_user.id, payload.client_run_id)
     if existing is not None:
@@ -193,6 +202,7 @@ def create_run(
 
     result = None
     segments: list[list[tuple[float, float]]] = []
+    accuracies: list[list[float | None]] = []
     quality = "unverified"
 
     if raw_fixes is not None:
@@ -201,6 +211,19 @@ def create_run(
         for seg in result.segments:
             pts = [(result.fixes[i].lat, result.fixes[i].lng) for i in seg.fix_indices]
             segments.append(pts)
+            if store_fixes:
+                accuracies.append([payload.fixes[i].accuracy_m for i in seg.fix_indices])
+
+        # Territory and the drawn route use the clean track; the distance stays
+        # the engine's. Old runs have invented timestamps, so their route is one
+        # segment. Never fails the upload: without road data it only smooths.
+        clean = clean_segments(
+            db, segments, accuracies if store_fixes else None,
+            fetcher=walk_fetcher, one_segment=not store_fixes,
+        )
+        segments = clean.segments
+        run.clean_method = clean.method
+        run.matched_fraction = clean.matched_fraction
 
         run.distance_km = result.distance_m / 1000.0
         run.raw_distance_km = result.raw_distance_m / 1000.0
